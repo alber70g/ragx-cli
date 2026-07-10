@@ -92,8 +92,8 @@ unreachable by vector search or rerank-alone, surfaced only via a hop-1 edge the
 - `Config.set` rejects keys not in `DEFAULTS` — add new config keys to DEFAULTS first.
 - Tests must not hit the network; one provider test self-skips when sentence-transformers
   is installed. Pyright import errors in editors = interpreter not set to `.venv`.
-- When running ragx against the wiki corpus: `cd` there, then
-  `uv run --project /Users/albert/projects/alber70g/ragx ragx-cli …` — and NEVER `git add`/commit
+- When running ragx-cli against the wiki corpus: `cd` there, then
+  `uv run --project /Users/albert/projects/alber70g/ragx-cli ragx-cli …` — and NEVER `git add`/commit
   from that directory (it's Albert's personal notes repo; `.ragx/` is gitignored there).
 
 ## What's next / deferred

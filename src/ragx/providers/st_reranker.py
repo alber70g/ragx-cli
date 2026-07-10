@@ -17,7 +17,7 @@ class STReranker:
             from sentence_transformers import CrossEncoder
         except ImportError as exc:
             raise RagxError(
-                "sentence-transformers not installed — install with: uv pip install 'ragx[rerank]'"
+                "sentence-transformers not installed — install with: uv tool install ragx-cli --with ragx-cli[rerank]"
             ) from exc
         self.model = model
         self._encoder = CrossEncoder(model)

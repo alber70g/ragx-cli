@@ -6,7 +6,7 @@ exists, so its effect on recall/MRR is measured against a stable baseline before
 ## Decisions
 
 1. **Opt-in only.** Temporal signals never influence ranking by default. No δ-term in the default
-   scoring formula. All behavior is activated by explicit `ragx query` flags.
+   scoring formula. All behavior is activated by explicit `ragx-cli query` flags.
 2. **Capabilities** (all three):
    - **Hard filters:** `--since <date>` / `--until <date>` constrain candidates by document date.
    - **Recency bias, directional:** a decay boost that is *configurable in direction* —
@@ -30,7 +30,7 @@ exists, so its effect on recall/MRR is measured against a stable baseline before
 
 - Schema: `files.doc_date` (ISO date, nullable) + `files.date_source` → SQLite `user_version = 2`
   migration. Backfill needs only a metadata pass (re-run date extraction per file) — **no
-  re-embedding required**; add e.g. `ragx index --refresh-dates`.
+  re-embedding required**; add e.g. `ragx-cli index --refresh-dates`.
 - Chunks inherit their file's date (chunk-level dates from in-text mentions were considered and
   parked — noisy, and most of the corpus is single-date documents).
 - Filters apply before traversal (constrain seeds and admitted neighbors); bias applies after

@@ -54,7 +54,7 @@ def find_root(start: Path | None = None) -> Path | None:
 def require_root(start: Path | None = None) -> Path:
     root = find_root(start)
     if root is None:
-        raise NotInitializedError("no .ragx/ found — run `ragx init` first")
+        raise NotInitializedError("no .ragx/ found — run `ragx-cli init` first")
     return root
 
 
@@ -124,7 +124,7 @@ class Config:
 
 
 def write_default_config(root: Path) -> Path:
-    """Create .ragx/ with a default config.toml. Used by `ragx init`."""
+    """Create .ragx/ with a default config.toml. Used by `ragx-cli init`."""
     cfg = Config({k: dict(v) for k, v in DEFAULTS.items()})
     cfg.save(root)
     return config_path(root)

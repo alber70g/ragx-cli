@@ -33,7 +33,7 @@ def _resolve_api_key(cfg: Config, section: str) -> str | None:
 
 def _resolve_base_url(cfg: Config, section: str) -> str:
     """Honor the conventional OPENAI_BASE_URL env var, but only while `<section>.base_url`
-    is still the built-in default — an explicit `ragx config set` always wins."""
+    is still the built-in default — an explicit `ragx-cli config set` always wins."""
     base_url = cfg.get(f"{section}.base_url")
     env_url = os.environ.get("OPENAI_BASE_URL")
     if env_url and base_url == _DEFAULT_OPENAI_BASE_URL:

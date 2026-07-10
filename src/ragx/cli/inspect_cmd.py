@@ -1,4 +1,4 @@
-"""ragx inspect: read-only introspection into the store (chunks, files, neighbors).
+"""ragx-cli inspect: read-only introspection into the store (chunks, files, neighbors).
 
 No embeddings or vector index needed — everything here reads Store directly.
 """

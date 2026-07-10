@@ -1,4 +1,4 @@
-# ragx module contracts — Phase 2–3 build
+# ragx-cli module contracts — Phase 2–3 build
 
 Same ground rules as CONTRACTS.md (read its "Global rules" and "Report protocol" — they apply
 verbatim). Own ONLY your listed files; never modify shared/core files or other modules' files.
@@ -131,7 +131,7 @@ def evaluate(queries: list[dict], configs: list[tuple[str, QueryOptions]], query
 
 # eval_cmd.py
 def register(app: typer.Typer) -> None: ...
-# ragx eval QUERIES_FILE [--json] [--top N] [--configs csv]
+# ragx-cli eval QUERIES_FILE [--json] [--top N] [--configs csv]
 # built-in configs: baseline (expand/graph/rerank all off), graph (only graph on),
 #                   full (all on). Default: run all three.
 # Constructs QueryOptions accordingly and query_fn from run_query + make_embedder(cfg) —
@@ -151,10 +151,10 @@ a monkeypatched evaluate/query_fn (no embeddings, no network).
 
 ```python
 def register(app: typer.Typer) -> None:   # app.add_typer(inspect_app, name="inspect")
-# ragx inspect chunk ID [--json]      -> chunk text, file, line/byte range + its edges
+# ragx-cli inspect chunk ID [--json]      -> chunk text, file, line/byte range + its edges
 #                                        (neighbor id, weight, neighbor's file path)
-# ragx inspect file PATH [--json]     -> file record + its chunks (id, line range, first 80 chars)
-# ragx inspect neighbors ID [--json]  -> store.neighbors(ID) enriched with each neighbor's file/lines
+# ragx-cli inspect file PATH [--json]     -> file record + its chunks (id, line range, first 80 chars)
+# ragx-cli inspect neighbors ID [--json]  -> store.neighbors(ID) enriched with each neighbor's file/lines
 ```
 
 All read-only over Store (find root via require_root; no embeddings, no vectors file needed).

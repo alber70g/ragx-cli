@@ -19,7 +19,7 @@ JSON schemas, deterministic exit codes, byte-exact source locations, and an `--e
 that can justify every result via the exact graph path that produced it.
 
 ```bash
-uv tool install ragx-cli       # or run one-off without installing: uvx ragx-cli ...
+uv tool install ragx-cli --with ragx-cli[rerank]  # install and use `ragx-cli`
 ragx-cli init                  # create .ragx/ with config.toml next to your corpus
 ragx-cli index                 # chunk -> embed -> HNSW + kNN similarity graph
 ragx-cli query "why did we switch build tools?" --json --files-only
@@ -41,7 +41,7 @@ uses a local sentence-transformers cross-encoder (`ragx-cli[rerank]` extra). Eve
   - [Using ragx-cli from a coding agent (CLAUDE.md / AGENTS.md)](#using-ragx-cli-from-a-coding-agent-claudemd--agentsmd)
     - [Pointing ragx-cli at your LLM — local or online](#pointing-ragx-cli-at-your-llm--local-or-online)
   - [Configuration](#configuration)
-  - [Features & roadmap](#features--roadmap)
+  - [Features \& roadmap](#features--roadmap)
 
 
 ## How it works

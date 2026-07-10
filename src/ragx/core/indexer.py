@@ -109,7 +109,7 @@ def _check_manifest(store: Store, embedder: Embedder, *, allow_rewrite: bool) ->
     if prev and prev != embedder.model and not allow_rewrite:
         raise ManifestMismatchError(
             f"index was built with {prev!r} but config says {embedder.model!r}; "
-            "run a full `ragx index` to rebuild"
+            "run a full `ragx-cli index` to rebuild"
         )
 
 

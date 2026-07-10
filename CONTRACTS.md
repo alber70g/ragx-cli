@@ -1,4 +1,4 @@
-# ragx module contracts (Phase 0–1 build)
+# ragx-cli module contracts (Phase 0–1 build)
 
 Ground truth for the module-parallel build. Each module owns exactly the files listed for it.
 **Do not create or edit files outside your module** — shared types live in `core/models.py`,
@@ -93,7 +93,7 @@ class OpenAICompatGenerator:  # implements providers.base.Generator
     # returns choices[0].message.content
 
 # st_reranker.py — lazy `import sentence_transformers` inside __init__;
-# ImportError -> RagxError("... install with: uv pip install 'ragx[rerank]'")
+# ImportError -> RagxError("... install with: uv tool install ragx-cli --with ragx-cli[rerank]")
 class STReranker:             # implements providers.base.Reranker
     def __init__(self, model: str): ...
     def score(self, query: str, texts: Sequence[str]) -> list[float]: ...  # CrossEncoder.predict
@@ -205,11 +205,11 @@ def fail(msg: str, code: int = 2) -> NoReturn: ...
 
 # app.py
 app = typer.Typer(...)
-# ragx init [path]      -> write_default_config at path (default cwd); error (exit 2) if .ragx exists;
+# ragx-cli init [path]      -> write_default_config at path (default cwd); error (exit 2) if .ragx-cli exists;
 #                          prints created config path
-# ragx status [--json]  -> root path, embedding model/provider, counts (files/chunks/edges) read via
+# ragx-cli status [--json]  -> root path, embedding model/provider, counts (files/chunks/edges) read via
 #                          Store if index.db exists else zeros, schema "ragx.status.v1" in JSON mode
-# ragx config get KEY / ragx config set KEY VALUE  -> Config.get / Config.set + save
+# ragx-cli config get KEY / ragx-cli config set KEY VALUE  -> Config.get / Config.set + save
 def main() -> None: ...   # entry point declared in pyproject [project.scripts]
 ```
 

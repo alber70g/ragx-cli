@@ -1,4 +1,4 @@
-"""ragx CLI shell: init, status, config. index/query are wired in a later pass."""
+"""ragx-cli CLI shell: init, status, config. index/query are wired in a later pass."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""`ragx eval` command. Registered onto the main app by app.py (integration-owned)."""
+"""`ragx-cli eval` command. Registered onto the main app by app.py (integration-owned)."""
 
 from __future__ import annotations
 
