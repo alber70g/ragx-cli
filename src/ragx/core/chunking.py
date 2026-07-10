@@ -11,6 +11,7 @@ from ragx.core.models import ChunkDraft
 MARKDOWN_EXTS = {".md", ".markdown"}
 CODE_EXTS = {".py", ".ts", ".js", ".tsx", ".jsx", ".go", ".rs", ".java", ".rb"}
 SEPARATORS = ["\n\n", "\n", ". ", " "]
+MIN_CHUNK_CHARS = 100  # fragments below this merge into a neighbor (may nudge it past hard max)
 
 _HEADING_RE = re.compile(r"^#{1,6} .*$", re.MULTILINE)
 _CODE_BOUNDARY_RE = re.compile(r"^(?:def|class|function|fn|func)\b", re.MULTILINE)
@@ -128,6 +129,20 @@ def _line_starts(text: str) -> list[int]:
     return starts
 
 
+def _merge_tiny_ranges(text: str, ranges: list[tuple[int, int]], min_chars: int) -> list[tuple[int, int]]:
+    """Absorb ranges with < min_chars of stripped text into the previous (or next) range."""
+    out: list[tuple[int, int]] = []
+    for start, end in ranges:
+        if out and len(text[start:end].strip()) < min_chars:
+            out[-1] = (out[-1][0], max(out[-1][1], end))
+        else:
+            out.append((start, end))
+    if len(out) >= 2 and len(text[out[0][0] : out[0][1]].strip()) < min_chars:
+        out[1] = (out[0][0], out[1][1])
+        out.pop(0)
+    return out
+
+
 def chunk_text(text: str, path: str, size_tokens: int = 800, overlap: float = 0.15) -> list[ChunkDraft]:
     """Split `text` into byte-exact ChunkDrafts, dispatching on `path`'s extension."""
     if not text.strip():
@@ -143,6 +158,8 @@ def chunk_text(text: str, path: str, size_tokens: int = 800, overlap: float = 0.
         ranges = _code_split(text, target_chars, hard_max_chars, overlap)
     else:
         ranges = _recursive_split(text, 0, len(text), target_chars, hard_max_chars, overlap)
+    min_chars = min(MIN_CHUNK_CHARS, max(1, target_chars // 8))
+    ranges = _merge_tiny_ranges(text, ranges, min_chars)
 
     char_to_byte = _char_byte_offsets(text)
     line_starts = _line_starts(text)

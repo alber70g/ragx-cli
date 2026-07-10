@@ -88,3 +88,12 @@ def test_no_whitespace_only_chunks():
     drafts = chunk_text(text, "x.md", size_tokens=4, overlap=0.15)
     assert drafts
     assert all(d.text.strip() for d in drafts)
+
+
+def test_tiny_fragments_merge_into_neighbor():
+    # a heading-only section and a recursive tail fragment must both get absorbed
+    body = ("word " * 900).strip()
+    text = f"## Empty heading\n\n# Big\n\n{body}\n"
+    drafts = chunk_text(text, "x.md", size_tokens=200, overlap=0.15)
+    assert len(drafts) >= 2
+    assert all(len(d.text.strip()) >= 100 for d in drafts)
