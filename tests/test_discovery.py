@@ -116,3 +116,10 @@ def test_hash_file_differs_on_content_change(tmp_path: Path):
     digest_b = hash_file(path)
 
     assert digest_a != digest_b
+
+
+def test_discover_skips_node_modules(tmp_path):
+    (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
+    (tmp_path / "node_modules" / "pkg" / "README.md").write_text("# pkg\n")
+    (tmp_path / "real.md").write_text("# real\n")
+    assert discover_files(tmp_path, ["**/*.md"], []) == ["real.md"]

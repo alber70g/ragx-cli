@@ -9,7 +9,7 @@ import xxhash
 
 MAX_FILE_SIZE = 2 * 1024 * 1024
 BINARY_SNIFF_BYTES = 8192
-ALWAYS_SKIP_DIRS = {".ragx", ".git"}
+ALWAYS_SKIP_DIRS = {".ragx", ".git", "node_modules", "__pycache__", ".venv", "venv"}
 
 
 def _is_binary(path: Path) -> bool:
@@ -34,7 +34,7 @@ def discover_files(
 ) -> list[str]:
     """Return sorted relative POSIX paths of files matching include/exclude under root.
 
-    Always skips .ragx/, .git/, hidden directories, binaries (NUL byte in first 8KB),
+    Always skips ALWAYS_SKIP_DIRS, hidden directories, binaries (NUL byte in first 8KB),
     and files larger than 2MB. Only a root-level .gitignore is honored (MVP limitation).
     """
     include_spec = pathspec.PathSpec.from_lines("gitwildmatch", include)

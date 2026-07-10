@@ -152,7 +152,7 @@ def chunk_text(text: str, path: str, size_tokens: int = 800, overlap: float = 0.
         if end <= start:
             continue
         chunk_str = text[start:end]
-        if not chunk_str:
+        if not chunk_str.strip():
             continue
         drafts.append(
             ChunkDraft(

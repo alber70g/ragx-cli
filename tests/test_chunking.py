@@ -80,3 +80,11 @@ def test_code_oversized_function_falls_back_to_recursive_split():
 
     assert len(drafts) > 1
     _assert_slice_invariant(text, drafts)
+
+
+def test_no_whitespace_only_chunks():
+    # heading sections separated by blank-only regions must not emit whitespace drafts
+    text = "# A\n\n\n\n# B\n\ncontent here\n"
+    drafts = chunk_text(text, "x.md", size_tokens=4, overlap=0.15)
+    assert drafts
+    assert all(d.text.strip() for d in drafts)
