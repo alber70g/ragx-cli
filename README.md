@@ -95,9 +95,20 @@ full justification: *seed → edge(weight) → chunk*, per result.
 
 ## Does it actually help? (benchmarks)
 
-Measured with the built-in harness (`ragx eval queries.jsonl`) on a real personal-notes corpus:
-**636 markdown files → 1,323 chunks → 5,246 edges**, 18 labeled queries (English + Dutch),
-embeddings `nomic-embed-text-v1.5` via LM Studio, reranker `BAAI/bge-reranker-v2-m3`.
+Measured with the built-in harness (`ragx eval queries.jsonl`) on a real, decade-spanning
+personal wiki — organic notes, not a synthetic benchmark. Corpus provenance:
+
+| | |
+|---|---|
+| **corpus** | 636 markdown files indexed (644 on disk; 8 auto-excluded as `node_modules`/hidden) · 2.9 MB · avg 4.6 KB/file |
+| **structure** | topical top-level dirs (`clients/`, `projects/`, `workstreams/`, `personal/`, …), nested up to 10 levels deep |
+| **content** | mixed **English + Dutch**: meeting/daily notes, research docs, transcripts, reference material |
+| **chunks** | 1,323 (avg 2.1 per file, 452 files are single-chunk; median 2,390 chars ≈ 600 tokens, max 4,888) |
+| **graph** | 5,246 edges · avg degree 7.9 (k=8 cap) · weights 0.59–1.00 above the 0.55 floor · only 3 isolated chunks |
+| **index** | 5.1 MB SQLite + 4.1 MB HNSW (768-dim `nomic-embed-text-v1.5` via LM Studio) · full build ≈ 2 min on an M-series laptop |
+| **labels** | 18 queries (EN + NL) with known-relevant files, single- and multi-target (`.ragx/queries.jsonl`) |
+
+Reranker: `BAAI/bge-reranker-v2-m3` (local cross-encoder). Results:
 
 | config                           | recall@5 | recall@10 |       MRR |
 | -------------------------------- | -------: | --------: | --------: |
