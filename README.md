@@ -40,7 +40,7 @@ uses a local sentence-transformers cross-encoder (`ragx[rerank]` extra). Everyth
   - [Using ragx from a coding agent (CLAUDE.md / AGENTS.md)](#using-ragx-from-a-coding-agent-claudemd--agentsmd)
     - [Pointing ragx at your LLM — local or online](#pointing-ragx-at-your-llm--local-or-online)
   - [Configuration](#configuration)
-  - [Status](#status)
+  - [Features & roadmap](#features--roadmap)
 
 
 ## How it works
