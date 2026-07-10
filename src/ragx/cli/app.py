@@ -16,6 +16,10 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 config_app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(config_app, name="config")
 
+from ragx.cli import pipeline  # noqa: E402  (needs `app` defined above)
+
+pipeline.register(app)
+
 
 def _require_root() -> Path:
     try:
