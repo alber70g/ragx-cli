@@ -1,6 +1,6 @@
-# ragx — similarity-graph RAG for your files
+# ragx-cli — similarity-graph RAG for your files
 
-`ragx` indexes a corpus of files into a **chunk-level embedding similarity graph** and answers
+`ragx-cli` indexes a corpus of files into a **chunk-level embedding similarity graph** and answers
 queries by combining vector search, **graph traversal**, and **cross-encoder reranking** — all
 from a single local CLI. Indexing needs **no LLM** (only an embedding model); an LLM is used
 optionally at query time, for query expansion.
@@ -8,9 +8,9 @@ optionally at query time, for query expansion.
 It works on any directory of text: pair it with a
 [Karpathy-style LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f),
 an OpenWiki instance, an Obsidian-style notes vault, or any other knowledgebase repository or
-arbitrary docs/code tree — `ragx init` drops a `.ragx/` directory next to the files and
-everything else stays untouched. LLM-maintained wikis and ragx are complementary: the wiki
-distills knowledge into curated pages, while ragx gives agents fast graph-backed retrieval
+arbitrary docs/code tree — `ragx-cli init` drops a `.ragx/` directory next to the files and
+everything else stays untouched. LLM-maintained wikis and ragx-cli are complementary: the wiki
+distills knowledge into curated pages, while ragx-cli gives agents fast graph-backed retrieval
 over those pages (and the raw sources beside them) without re-reading everything per question.
 
 **The goal:** local semantic search that finds documents *plain vector search misses*, stays
@@ -19,26 +19,27 @@ JSON schemas, deterministic exit codes, byte-exact source locations, and an `--e
 that can justify every result via the exact graph path that produced it.
 
 ```bash
-ragx init                      # create .ragx/ with config.toml next to your corpus
-ragx index                     # chunk -> embed -> HNSW + kNN similarity graph
-ragx query "why did we switch build tools?" --json --files-only
-ragx index --changed           # incremental: only new/modified/deleted files
+uv tool install ragx-cli       # or run one-off without installing: uvx ragx-cli ...
+ragx-cli init                  # create .ragx/ with config.toml next to your corpus
+ragx-cli index                 # chunk -> embed -> HNSW + kNN similarity graph
+ragx-cli query "why did we switch build tools?" --json --files-only
+ragx-cli index --changed       # incremental: only new/modified/deleted files
 ```
 
 Runs against any OpenAI-compatible embedding endpoint (LM Studio, Ollama, OpenAI). Reranking
-uses a local sentence-transformers cross-encoder (`ragx[rerank]` extra). Everything lives in a
+uses a local sentence-transformers cross-encoder (`ragx-cli[rerank]` extra). Everything lives in a
 `.ragx/` directory beside your files — like `.git/`, delete it and the corpus is untouched.
 
 ---
 
-- [ragx — similarity-graph RAG for your files](#ragx--similarity-graph-rag-for-your-files)
+- [ragx-cli — similarity-graph RAG for your files](#ragx-cli--similarity-graph-rag-for-your-files)
   - [How it works](#how-it-works)
     - [Indexing (LLM-free)](#indexing-llm-free)
     - [Querying](#querying)
   - [Does it actually help? (benchmarks)](#does-it-actually-help-benchmarks)
   - [Agent-first conventions](#agent-first-conventions)
-  - [Using ragx from a coding agent (CLAUDE.md / AGENTS.md)](#using-ragx-from-a-coding-agent-claudemd--agentsmd)
-    - [Pointing ragx at your LLM — local or online](#pointing-ragx-at-your-llm--local-or-online)
+  - [Using ragx-cli from a coding agent (CLAUDE.md / AGENTS.md)](#using-ragx-cli-from-a-coding-agent-claudemd--agentsmd)
+    - [Pointing ragx-cli at your LLM — local or online](#pointing-ragx-cli-at-your-llm--local-or-online)
   - [Configuration](#configuration)
   - [Features & roadmap](#features--roadmap)
 
@@ -84,7 +85,7 @@ flowchart TD
     F --> O["ranked chunks (or files via --files-only)<br/>+ --explain traversal trace"]
 ```
 
-**Heat propagation** is what sets ragx apart from plain RAG: seed chunks (from vector search)
+**Heat propagation** is what sets ragx-cli apart from plain RAG: seed chunks (from vector search)
 push "heat" along similarity edges — `heat × edge_weight × decay` per hop. A neighbor's heat is
 the **max** of incoming contributions (not the sum, so hub chunks can't inflate themselves), and
 a neighbor is only admitted if it's similar enough to the *original query* — traversal stays
@@ -107,7 +108,7 @@ full justification: *seed → edge(weight) → chunk*, per result.
 
 ## Does it actually help? (benchmarks)
 
-Measured with the built-in harness (`ragx eval queries.jsonl`) on a real, decade-spanning
+Measured with the built-in harness (`ragx-cli eval queries.jsonl`) on a real, decade-spanning
 personal wiki — organic notes, not a synthetic benchmark. Corpus provenance:
 
 | | |
@@ -161,85 +162,85 @@ rerank ship together**. Use `--no-graph --no-rerank` as the explicit fast mode.
 - Every chunk carries `file`, `line_start/line_end`, `byte_start/byte_end` — agents jump to the
   exact source location and read the full text themselves (JSON chunk text is truncated).
 - `--files-only` aggregates chunk scores per file (sum of top-3) — the mode coding agents use most.
-- `ragx query -` reads the query from stdin; `ragx inspect chunk|file|neighbors` debugs the graph.
+- `ragx-cli query -` reads the query from stdin; `ragx-cli inspect chunk|file|neighbors` debugs the graph.
 
-## Using ragx from a coding agent (CLAUDE.md / AGENTS.md)
+## Using ragx-cli from a coding agent (CLAUDE.md / AGENTS.md)
 
 Give your agent standing instructions by pasting this into the repo's `CLAUDE.md` or `AGENTS.md`
 (adjust the fenced block to your corpus):
 
 ```markdown
-## Semantic search with ragx
+## Semantic search with ragx-cli
 
-This repo has a ragx index (`.ragx/`). Prefer it over grep for "where is X discussed/decided?"
+This repo has a ragx-cli index (`.ragx/`). Prefer it over grep for "where is X discussed/decided?"
 questions; fall back to grep for exact identifiers.
 
-- Find relevant files: `ragx query "<natural-language question>" --json --files-only`
-- Get chunks with exact locations: `ragx query "..." --json --top 8` — each result carries
+- Find relevant files: `ragx-cli query "<natural-language question>" --json --files-only`
+- Get chunks with exact locations: `ragx-cli query "..." --json --top 8` — each result carries
   `file` + `line_start/line_end`; the JSON `text` is truncated, so read the file yourself
   for full context.
 - Fast mode (no LLM call, no cross-encoder): add `--no-expand --no-rerank`.
-- After adding or editing files: `ragx index --changed` (cheap, hash-based).
+- After adding or editing files: `ragx-cli index --changed` (cheap, hash-based).
 - stdout is exactly one JSON document; logs are on stderr.
   Exit codes: 0 = results, 1 = no results (not an error), 2 = error.
-- Why did this result appear? `ragx query "..." --explain`.
-  Explore the graph: `ragx inspect neighbors <chunk_id>`.
+- Why did this result appear? `ragx-cli query "..." --explain`.
+  Explore the graph: `ragx-cli inspect neighbors <chunk_id>`.
 ```
 
-### Pointing ragx at your LLM — local or online
+### Pointing ragx-cli at your LLM — local or online
 
-ragx talks to any **OpenAI-compatible** API for embeddings and (optionally) query expansion.
-Pick one recipe; run it inside the corpus after `ragx init`:
+ragx-cli talks to any **OpenAI-compatible** API for embeddings and (optionally) query expansion.
+Pick one recipe; run it inside the corpus after `ragx-cli init`:
 
 **LM Studio** (default — nothing to change if it runs on `localhost:1234`):
 
 ```bash
 curl -s http://localhost:1234/v1/models   # see what's loaded
-ragx config set embeddings.model text-embedding-nomic-embed-text-v1.5
-ragx config set expansion.model  <any-chat-model-id>     # or: ragx config set expansion.enabled false
+ragx-cli config set embeddings.model text-embedding-nomic-embed-text-v1.5
+ragx-cli config set expansion.model  <any-chat-model-id>     # or: ragx-cli config set expansion.enabled false
 ```
 
 **Ollama** (base_url switches to `localhost:11434/v1` automatically):
 
 ```bash
 ollama pull nomic-embed-text
-ragx config set embeddings.provider ollama
-ragx config set embeddings.model nomic-embed-text
-ragx config set expansion.provider ollama
-ragx config set expansion.model llama3.1                  # any local chat model
+ragx-cli config set embeddings.provider ollama
+ragx-cli config set embeddings.model nomic-embed-text
+ragx-cli config set expansion.provider ollama
+ragx-cli config set expansion.model llama3.1                  # any local chat model
 ```
 
 **Online / any OpenAI-compatible endpoint** (OpenAI, OpenRouter, Together, …).
-ragx honors the conventional env vars used by generic OpenAI-compatible tooling — with
+ragx-cli honors the conventional env vars used by generic OpenAI-compatible tooling — with
 `OPENAI_BASE_URL` and `OPENAI_API_KEY` exported, only the model names need configuring:
 
 ```bash
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_API_KEY=sk-...
-ragx config set embeddings.model text-embedding-3-small
-ragx config set embeddings.doc_prefix ""                  # prefixes are for nomic-style models
-ragx config set embeddings.query_prefix ""
-ragx config set expansion.model gpt-5.2-mini
+ragx-cli config set embeddings.model text-embedding-3-small
+ragx-cli config set embeddings.doc_prefix ""                  # prefixes are for nomic-style models
+ragx-cli config set embeddings.query_prefix ""
+ragx-cli config set expansion.model gpt-5.2-mini
 ```
 
 Precedence rules (per section, embeddings and expansion independently):
 
-- `base_url`: an explicit `ragx config set <section>.base_url …` always wins;
+- `base_url`: an explicit `ragx-cli config set <section>.base_url …` always wins;
   `OPENAI_BASE_URL` applies only while the config still holds the built-in default.
-- API key: `ragx config set <section>.api_key_env MY_VAR` names an env var to read (and fails
+- API key: `ragx-cli config set <section>.api_key_env MY_VAR` names an env var to read (and fails
   loudly if that variable is unset); without it, `OPENAI_API_KEY` is used when present.
   Secrets themselves never go in `config.toml`.
 
 Mixed setups are normal — e.g. local Ollama embeddings + online expansion via
-`ragx config set expansion.base_url https://openrouter.ai/api/v1` +
-`ragx config set expansion.api_key_env OPENROUTER_API_KEY`. The reranker is always local
-(sentence-transformers); disable it with `ragx config set rerank.enabled false` if the model
-download is unwanted. **Note:** changing the embedding model invalidates the index — ragx
-detects the mismatch and asks you to run a full `ragx index`.
+`ragx-cli config set expansion.base_url https://openrouter.ai/api/v1` +
+`ragx-cli config set expansion.api_key_env OPENROUTER_API_KEY`. The reranker is always local
+(sentence-transformers); disable it with `ragx-cli config set rerank.enabled false` if the model
+download is unwanted. **Note:** changing the embedding model invalidates the index — ragx-cli
+detects the mismatch and asks you to run a full `ragx-cli index`.
 
 ## Configuration
 
-`.ragx/config.toml`, managed via `ragx config get|set`. Key defaults:
+`.ragx/config.toml`, managed via `ragx-cli config get|set`. Key defaults:
 
 | section | defaults |
 |---|---|
@@ -250,7 +251,7 @@ detects the mismatch and asks you to run a full `ragx index`.
 | `[scoring]` | `alpha_rerank=0.6`, `beta_heat=0.25`, `gamma_vector=0.15` |
 | `[embeddings]` | `provider="openai"`, `base_url="http://localhost:1234/v1"`, prefixes for nomic-style models, `api_key_env=""` |
 | `[expansion]` | optional LLM for multi-query/HyDE; reasoning models supported (4096-token budget); `api_key_env=""` |
-| `[rerank]` | `BAAI/bge-reranker-v2-m3` via sentence-transformers (`pip install 'ragx[rerank]'`) |
+| `[rerank]` | `BAAI/bge-reranker-v2-m3` via sentence-transformers (`uv tool install 'ragx-cli[rerank]'`) |
 
 ## Features & roadmap
 
@@ -264,7 +265,7 @@ unchecked ones are next up:
 - [ ] **Communities**: Leiden detection over the edge list, `query --global` for corpus-level questions
 - [ ] **MCP server**: a second thin shell over `ragx.core` (the core/CLI split it needs is already enforced)
 - [ ] **[Temporal weighting](docs/feature-temporal-weighting.md)**: opt-in `--since`/`--until`/`--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime
-- [ ] **Release**: publish to PyPI so `uvx ragx` works out of the box
+- [ ] **Release**: publish to PyPI as `ragx-cli` (plain `ragx` is name-blocked, too similar to an existing project) so `uvx ragx-cli` works out of the box
 
 Development: `uv sync --group dev && uv run pytest`. 126 tests; module contracts live in
 `CONTRACTS.md` / `CONTRACTS-PHASE23.md`.

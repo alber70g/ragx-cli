@@ -24,7 +24,7 @@ API contracts for every core module. Deferred feature specs live in `docs/`.
   Env fallbacks: `OPENAI_BASE_URL` (only while base_url is still the default) and
   `OPENAI_API_KEY` (only when `api_key_env` is unset); explicit config always wins.
 - Reranker is always local: sentence-transformers CrossEncoder `BAAI/bge-reranker-v2-m3`
-  (optional extra `ragx[rerank]`). LM Studio has NO /v1/rerank endpoint — verified; don't try.
+  (optional extra `ragx-cli[rerank]`). LM Studio has NO /v1/rerank endpoint — verified; don't try.
 
 ## Layout (core/CLI split is the one architectural rule — MCP server later rides on it)
 
@@ -54,13 +54,13 @@ tests/             # 126 tests; mocked HTTP (respx), FakeEmbedder integration te
 
 ## Flows
 
-**Index** (`ragx index [--changed]`): discover files (include/exclude globs, root .gitignore,
+**Index** (`ragx-cli index [--changed]`): discover files (include/exclude globs, root .gitignore,
 skip node_modules/.venv/hidden/binaries/>2MB) → xxhash diff (`--changed` = incremental, default
 = full rebuild) → chunk (~800 tok target, chunks are exact byte slices, sub-100-char fragments
 merge into neighbors) → embed batched → HNSW add → kNN edges per new chunk (k=8, cos ≥ 0.55)
 + recompute edge lists of pre-existing neighbors that appear in new lists.
 
-**Query** (`ragx query "..."`): optional expansion (1 LLM call, strict-JSON parse, graceful
+**Query** (`ragx-cli query "..."`): optional expansion (1 LLM call, strict-JSON parse, graceful
 no-op on failure) → embed all variants, HNSW top-20 each → RRF merge = seeds → heat propagation
 (2 hops, decay 0.5, heat = max not sum, neighbor admitted only if cos(query) ≥ 0.35 floor,
 frontier ≤ 150) → cross-encoder rerank of top-100 shortlist → final =
@@ -86,14 +86,14 @@ unreachable by vector search or rerank-alone, surfaced only via a hop-1 edge the
   *reasoning* model: answers land in `content` only after thinking; expansion uses
   max_tokens=4096 and takes ~40 s/call. Don't lower it.
 - Changing `embeddings.model` invalidates the index; run_query fails loud on manifest
-  mismatch; full `ragx index` rebuilds.
+  mismatch; full `ragx-cli index` rebuilds.
 - Chunk ids are SQLite AUTOINCREMENT rowids AND hnswlib labels — never reused after delete.
   hnswlib can't enumerate deletions, hence the `vectors.hnsw.meta.json` sidecar.
 - `Config.set` rejects keys not in `DEFAULTS` — add new config keys to DEFAULTS first.
 - Tests must not hit the network; one provider test self-skips when sentence-transformers
   is installed. Pyright import errors in editors = interpreter not set to `.venv`.
 - When running ragx against the wiki corpus: `cd` there, then
-  `uv run --project /Users/albert/projects/alber70g/ragx ragx …` — and NEVER `git add`/commit
+  `uv run --project /Users/albert/projects/alber70g/ragx ragx-cli …` — and NEVER `git add`/commit
   from that directory (it's Albert's personal notes repo; `.ragx/` is gitignored there).
 
 ## What's next / deferred
@@ -103,7 +103,7 @@ unreachable by vector search or rerank-alone, surfaced only via a hop-1 edge the
 - Temporal weighting: full decided spec in `docs/feature-temporal-weighting.md` — opt-in
   `--since/--until/--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime,
   schema v2 migration. Build only after it can be measured against the eval baseline.
-- README packaging claims (`uvx ragx`) are aspirational — not yet published to PyPI.
+- README packaging claims (`uvx ragx-cli`; PyPI name ragx-cli, plain `ragx` is name-blocked) are aspirational — not yet published to PyPI.
 
 ## Dev loop
 
