@@ -41,7 +41,7 @@ one kNN pass over the vectors that are already in memory — each chunk gets edg
 nearest neighbors above a similarity floor.
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[files] --> B["discover + hash<br/>(gitignore, binary/junk filters,<br/>xxhash for incremental)"]
     B --> C["chunk<br/>(headings / code boundaries,<br/>byte-exact slices + line ranges)"]
     C --> D["embed<br/>(any OpenAI-compatible endpoint)"]
@@ -99,24 +99,24 @@ Measured with the built-in harness (`ragx eval queries.jsonl`) on a real persona
 **636 markdown files → 1,323 chunks → 5,246 edges**, 18 labeled queries (English + Dutch),
 embeddings `nomic-embed-text-v1.5` via LM Studio, reranker `BAAI/bge-reranker-v2-m3`.
 
-| config | recall@5 | recall@10 | MRR |
-|---|---:|---:|---:|
-| `baseline` — vector search only | 0.833 | 0.833 | 0.593 |
-| `graph` — + heat propagation | 0.778 | 0.833 | 0.522 |
-| `rerank` — graph + cross-encoder | 0.759 | **0.889** | 0.568 |
-| `full` — + LLM expansion | 0.759 | **0.889** | **0.613** |
+| config                           | recall@5 | recall@10 |       MRR |
+| -------------------------------- | -------: | --------: | --------: |
+| `baseline` — vector search only  |    0.833 |     0.833 |     0.593 |
+| `graph` — + heat propagation     |    0.778 |     0.833 |     0.522 |
+| `rerank` — graph + cross-encoder |    0.759 | **0.889** |     0.568 |
+| `full` — + LLM expansion         |    0.759 | **0.889** | **0.613** |
 
 The recall win is exactly the designed mechanism, and it's traceable. For one Dutch query
 ("zonnepanelen offerte en terugverdientijd"), the relevant document is **never retrieved** by
 vector search — and a reranker alone can't help, because you can't rerank what retrieval never
 surfaced:
 
-| pipeline | rank of the relevant file |
-|---|---:|
-| vector search only | *not found* |
-| rerank **without** graph | *not found* |
-| graph only | 19 |
-| graph **+** rerank | **4** |
+| pipeline                 | rank of the relevant file |
+| ------------------------ | ------------------------: |
+| vector search only       |               *not found* |
+| rerank **without** graph |               *not found* |
+| graph only               |                        19 |
+| graph **+** rerank       |                     **4** |
 
 The graph surfaced it through a single hop-1 edge (weight 0.86) from a seed chunk, and the
 cross-encoder promoted it — *graph expands recall, rerank recovers precision*. The `--explain`
