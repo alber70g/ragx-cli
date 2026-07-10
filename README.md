@@ -254,17 +254,17 @@ detects the mismatch and asks you to run a full `ragx index`.
 
 ## Features & roadmap
 
-Built and validated through Phase 3 of [the implementation plan](ragx-cli-plan.md); unchecked
-items are deferred by design:
+Delivered in the order of [the implementation plan](ragx-cli-plan.md), each phase building on
+the last; unchecked phases are next up:
 
-- [x] Phase 0 — skeleton: CLI, SQLite schema, provider abstraction
-- [x] Phase 1 — baseline vector RAG: discovery, chunking, embeddings, HNSW
-- [x] Phase 2 — similarity graph: kNN edges, heat-propagation traversal, `inspect`, `--explain`
-- [x] Phase 3 — expansion (multi-query/HyDE), RRF fusion, cross-encoder rerank, `eval` harness
-- [ ] Leiden community detection over the edge list + `query --global` for corpus-level questions
-- [ ] MCP server — a second thin shell over `ragx.core` (the core/CLI split it needs is already enforced)
-- [ ] [Temporal weighting](docs/feature-temporal-weighting.md) — opt-in `--since`/`--until`/`--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime
-- [ ] PyPI packaging so `uvx ragx` works out of the box
+- [x] Phase 0 — **skeleton**: typer CLI, SQLite schema, provider abstraction (Embedder/Generator/Reranker)
+- [x] Phase 1 — **baseline vector RAG**: discovery, chunking, embeddings, HNSW search, incremental `--changed`
+- [x] Phase 2 — **similarity graph**: kNN edge construction, heat-propagation traversal, `inspect`, `--explain`
+- [x] Phase 3 — **quality & measurement**: multi-query/HyDE expansion, RRF fusion, cross-encoder rerank, `eval` harness
+- [ ] Phase 4 — **communities**: Leiden detection over the edge list, `query --global` for corpus-level questions
+- [ ] Phase 5 — **MCP server**: a second thin shell over `ragx.core` (the core/CLI split it needs is already enforced)
+- [ ] Phase 6 — **[temporal weighting](docs/feature-temporal-weighting.md)**: opt-in `--since`/`--until`/`--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime
+- [ ] Phase 7 — **release**: publish to PyPI so `uvx ragx` works out of the box
 
 Development: `uv sync --group dev && uv run pytest`. 126 tests; module contracts live in
 `CONTRACTS.md` / `CONTRACTS-PHASE23.md`.
