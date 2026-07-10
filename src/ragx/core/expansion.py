@@ -55,7 +55,8 @@ def _extract_json(raw: str) -> dict:
 def expand_query(gen: Generator, query: str, *, variants: int = 3, hyde: bool = True) -> Expansion:
     empty = Expansion([], None)
     try:
-        raw = gen.generate(_SYSTEM, _build_prompt(query, variants, hyde))
+        # generous budget: reasoning models spend tokens thinking before the JSON
+        raw = gen.generate(_SYSTEM, _build_prompt(query, variants, hyde), max_tokens=4096)
         data = _extract_json(raw)
         if not isinstance(data, dict) or "queries" not in data:
             raise ValueError(f"unexpected JSON shape: {data!r}")

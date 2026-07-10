@@ -17,6 +17,7 @@ from ragx.providers.registry import make_embedder, make_generator, make_reranker
 _BUILTIN_CONFIGS: dict[str, QueryOptions] = {
     "baseline": QueryOptions(expand=False, graph=False, rerank=False),
     "graph": QueryOptions(expand=False, graph=True, rerank=False),
+    "rerank": QueryOptions(expand=False, graph=True, rerank=True),
     "full": QueryOptions(expand=True, graph=True, rerank=True),
 }
 
