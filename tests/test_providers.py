@@ -129,7 +129,8 @@ def _config(overrides: dict | None = None) -> Config:
     return Config(data)
 
 
-def test_make_embedder_openai():
+def test_make_embedder_openai(monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     cfg = _config()
     emb = make_embedder(cfg)
     assert isinstance(emb, OpenAICompatEmbedder)
@@ -177,3 +178,52 @@ def test_make_reranker_missing_extra_returns_none_and_warns(capsys):
     assert result is None
     captured = capsys.readouterr()
     assert "rerank" in captured.err.lower() or "sentence-transformers" in captured.err.lower()
+
+
+def test_api_key_env_resolved_and_sent(monkeypatch):
+    monkeypatch.setenv("RAGX_TEST_KEY", "sk-test-123")
+    cfg = _config({"embeddings": {"api_key_env": "RAGX_TEST_KEY"}})
+    with respx.mock(base_url="http://localhost:1234/v1") as mock:
+        route = mock.post("/embeddings").respond(
+            200, json={"data": [{"embedding": [0.1, 0.2]}]}
+        )
+        make_embedder(cfg).embed_documents(["x"])
+    assert route.calls[0].request.headers["authorization"] == "Bearer sk-test-123"
+
+
+def test_api_key_env_missing_fails_loud(monkeypatch):
+    monkeypatch.delenv("RAGX_NO_SUCH_KEY", raising=False)
+    cfg = _config({"embeddings": {"api_key_env": "RAGX_NO_SUCH_KEY"}})
+    with pytest.raises(RagxError, match="RAGX_NO_SUCH_KEY"):
+        make_embedder(cfg)
+
+
+def test_openai_base_url_env_applies_to_untouched_default(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.example.com/v1/")
+    assert make_embedder(_config()).base_url.rstrip("/") == "https://api.example.com/v1"
+
+
+def test_openai_base_url_env_loses_to_explicit_config(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.example.com/v1")
+    cfg = _config({"embeddings": {"base_url": "http://myhost:9999/v1"}})
+    assert make_embedder(cfg).base_url == "http://myhost:9999/v1"
+
+
+def test_openai_api_key_env_fallback_sends_header(monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-ambient")
+    with respx.mock(base_url="http://localhost:1234/v1") as mock:
+        route = mock.post("/embeddings").respond(200, json={"data": [{"embedding": [0.1]}]})
+        make_embedder(_config()).embed_documents(["x"])
+    assert route.calls[0].request.headers["authorization"] == "Bearer sk-ambient"
+
+
+def test_api_key_env_config_beats_openai_api_key(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-ambient")
+    monkeypatch.setenv("MY_KEY", "sk-explicit")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    cfg = _config({"embeddings": {"api_key_env": "MY_KEY"}})
+    with respx.mock(base_url="http://localhost:1234/v1") as mock:
+        route = mock.post("/embeddings").respond(200, json={"data": [{"embedding": [0.1]}]})
+        make_embedder(cfg).embed_documents(["x"])
+    assert route.calls[0].request.headers["authorization"] == "Bearer sk-explicit"

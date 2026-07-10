@@ -132,6 +132,80 @@ rerank ship together**. Use `--no-graph --no-rerank` as the explicit fast mode.
 - `--files-only` aggregates chunk scores per file (sum of top-3) — the mode coding agents use most.
 - `ragx query -` reads the query from stdin; `ragx inspect chunk|file|neighbors` debugs the graph.
 
+## Using ragx from a coding agent (CLAUDE.md / AGENTS.md)
+
+Give your agent standing instructions by pasting this into the repo's `CLAUDE.md` or `AGENTS.md`
+(adjust the fenced block to your corpus):
+
+```markdown
+## Semantic search with ragx
+
+This repo has a ragx index (`.ragx/`). Prefer it over grep for "where is X discussed/decided?"
+questions; fall back to grep for exact identifiers.
+
+- Find relevant files: `ragx query "<natural-language question>" --json --files-only`
+- Get chunks with exact locations: `ragx query "..." --json --top 8` — each result carries
+  `file` + `line_start/line_end`; the JSON `text` is truncated, so read the file yourself
+  for full context.
+- Fast mode (no LLM call, no cross-encoder): add `--no-expand --no-rerank`.
+- After adding or editing files: `ragx index --changed` (cheap, hash-based).
+- stdout is exactly one JSON document; logs are on stderr.
+  Exit codes: 0 = results, 1 = no results (not an error), 2 = error.
+- Why did this result appear? `ragx query "..." --explain`.
+  Explore the graph: `ragx inspect neighbors <chunk_id>`.
+```
+
+### Pointing ragx at your LLM — local or online
+
+ragx talks to any **OpenAI-compatible** API for embeddings and (optionally) query expansion.
+Pick one recipe; run it inside the corpus after `ragx init`:
+
+**LM Studio** (default — nothing to change if it runs on `localhost:1234`):
+
+```bash
+curl -s http://localhost:1234/v1/models   # see what's loaded
+ragx config set embeddings.model text-embedding-nomic-embed-text-v1.5
+ragx config set expansion.model  <any-chat-model-id>     # or: ragx config set expansion.enabled false
+```
+
+**Ollama** (base_url switches to `localhost:11434/v1` automatically):
+
+```bash
+ollama pull nomic-embed-text
+ragx config set embeddings.provider ollama
+ragx config set embeddings.model nomic-embed-text
+ragx config set expansion.provider ollama
+ragx config set expansion.model llama3.1                  # any local chat model
+```
+
+**Online / any OpenAI-compatible endpoint** (OpenAI, OpenRouter, Together, …).
+ragx honors the conventional env vars used by generic OpenAI-compatible tooling — with
+`OPENAI_BASE_URL` and `OPENAI_API_KEY` exported, only the model names need configuring:
+
+```bash
+export OPENAI_BASE_URL=https://api.openai.com/v1
+export OPENAI_API_KEY=sk-...
+ragx config set embeddings.model text-embedding-3-small
+ragx config set embeddings.doc_prefix ""                  # prefixes are for nomic-style models
+ragx config set embeddings.query_prefix ""
+ragx config set expansion.model gpt-5.2-mini
+```
+
+Precedence rules (per section, embeddings and expansion independently):
+
+- `base_url`: an explicit `ragx config set <section>.base_url …` always wins;
+  `OPENAI_BASE_URL` applies only while the config still holds the built-in default.
+- API key: `ragx config set <section>.api_key_env MY_VAR` names an env var to read (and fails
+  loudly if that variable is unset); without it, `OPENAI_API_KEY` is used when present.
+  Secrets themselves never go in `config.toml`.
+
+Mixed setups are normal — e.g. local Ollama embeddings + online expansion via
+`ragx config set expansion.base_url https://openrouter.ai/api/v1` +
+`ragx config set expansion.api_key_env OPENROUTER_API_KEY`. The reranker is always local
+(sentence-transformers); disable it with `ragx config set rerank.enabled false` if the model
+download is unwanted. **Note:** changing the embedding model invalidates the index — ragx
+detects the mismatch and asks you to run a full `ragx index`.
+
 ## Configuration
 
 `.ragx/config.toml`, managed via `ragx config get|set`. Key defaults:
@@ -143,8 +217,8 @@ rerank ship together**. Use `--no-graph --no-rerank` as the explicit fast mode.
 | `[traversal]` | `hops=2`, `decay=0.5`, `query_floor=0.35`, `max_frontier=150` |
 | `[fusion]` | `rrf_k=60`, `per_query_top=20` |
 | `[scoring]` | `alpha_rerank=0.6`, `beta_heat=0.25`, `gamma_vector=0.15` |
-| `[embeddings]` | `provider="openai"`, `base_url="http://localhost:1234/v1"`, prefixes for nomic-style models |
-| `[expansion]` | optional LLM for multi-query/HyDE; reasoning models supported (4096-token budget) |
+| `[embeddings]` | `provider="openai"`, `base_url="http://localhost:1234/v1"`, prefixes for nomic-style models, `api_key_env=""` |
+| `[expansion]` | optional LLM for multi-query/HyDE; reasoning models supported (4096-token budget); `api_key_env=""` |
 | `[rerank]` | `BAAI/bge-reranker-v2-m3` via sentence-transformers (`pip install 'ragx[rerank]'`) |
 
 ## Status

@@ -26,6 +26,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "doc_prefix": "search_document: ",
         "query_prefix": "search_query: ",
         "batch_size": 32,
+        "api_key_env": "",  # NAME of an env var holding the API key; empty = no auth header
     },
     "expansion": {
         "enabled": True,
@@ -34,6 +35,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "model": "mlx-community/Ornith-1.0-35B-3bit",
         "variants": 3,
         "hyde": True,
+        "api_key_env": "",
     },
     "rerank": {"enabled": True, "provider": "sentence-transformers", "model": "BAAI/bge-reranker-v2-m3"},
     "query": {"top": 8, "max_chunk_chars": 1200},
