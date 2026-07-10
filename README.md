@@ -5,6 +5,14 @@ queries by combining vector search, **graph traversal**, and **cross-encoder rer
 from a single local CLI. Indexing needs **no LLM** (only an embedding model); an LLM is used
 optionally at query time, for query expansion.
 
+It works on any directory of text: pair it with a
+[Karpathy-style LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f),
+an OpenWiki instance, an Obsidian-style notes vault, or any other knowledgebase repository or
+arbitrary docs/code tree — `ragx init` drops a `.ragx/` directory next to the files and
+everything else stays untouched. LLM-maintained wikis and ragx are complementary: the wiki
+distills knowledge into curated pages, while ragx gives agents fast graph-backed retrieval
+over those pages (and the raw sources beside them) without re-reading everything per question.
+
 **The goal:** local semantic search that finds documents *plain vector search misses*, stays
 cheap to (re)index, and is built to be driven by coding agents as much as by humans — stable
 JSON schemas, deterministic exit codes, byte-exact source locations, and an `--explain` mode
