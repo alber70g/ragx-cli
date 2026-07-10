@@ -85,3 +85,25 @@ def test_incremental_reindex(tmp_path):
     out = run_query(tmp_path, cfg, emb, "hamsters wheels", QueryOptions(top=3))
     assert out.results[0].chunk.file_path == "pets.md"
     assert all(r.chunk.file_path != "space.md" for r in out.results)
+
+
+def test_graph_edges_and_traversal(tmp_path):
+    make_corpus(tmp_path)
+    (tmp_path / "pets2.md").write_text("# More pets\n\nDogs bark at cats. Cats purr at dogs.\n")
+    write_default_config(tmp_path)
+    cfg = Config.load(tmp_path)
+    cfg.set("graph.min_edge_sim", "0.3")  # fake embeddings are coarse
+    emb = FakeEmbedder()
+    stats = run_index(tmp_path, cfg, emb)
+    assert stats.edges_total > 0
+
+    out = run_query(
+        tmp_path, cfg, emb, "dogs bark cats",
+        QueryOptions(top=4, expand=False, rerank=False, explain=True),
+    )
+    assert out.results
+    files = {r.chunk.file_path for r in out.results}
+    assert {"pets.md", "pets2.md"} <= files
+    # explain traces exist and parent-chains terminate at a seed (hop 0)
+    assert all(r.explain is not None for r in out.results)
+    assert any(r.explain["hop"] == 0 for r in out.results)

@@ -10,6 +10,7 @@ from ragx.core.chunking import chunk_text
 from ragx.core.config import Config, db_path, vectors_path
 from ragx.core.discovery import discover_files, hash_file
 from ragx.core.errors import ManifestMismatchError
+from ragx.core.graph import affected_ids, knn_edges
 from ragx.core.models import FileRecord
 from ragx.core.store import Store
 from ragx.core.vectors import VectorIndex
@@ -25,6 +26,7 @@ class IndexStats:
     files_unchanged: int = 0
     chunks_added: int = 0
     chunks_deleted: int = 0
+    edges_total: int = 0
 
 
 def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool = False) -> IndexStats:
@@ -67,6 +69,7 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool
 
         size_tokens = cfg.get("chunking.size_tokens")
         overlap = cfg.get("chunking.overlap")
+        new_ids: list[int] = []
         for path in sorted(to_index):
             if path in known:  # changed file: drop old chunks first
                 removed = store.delete_file(path)
@@ -81,10 +84,22 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool
             ids = store.insert_chunks(path, drafts)
             vectors = embedder.embed_documents([d.text for d in drafts])
             index.add(ids, vectors)
+            new_ids.extend(ids)
             stats.files_indexed += 1
             stats.chunks_added += len(ids)
             log.info("indexed %s (%d chunks)", path, len(ids))
 
+        if new_ids:
+            k, min_sim = cfg.get("graph.k"), cfg.get("graph.min_edge_sim")
+            edges = knn_edges(index, new_ids, k, min_sim)
+            touched = affected_ids(edges)
+            if touched:  # incremental: refresh edge lists of pre-existing neighbors
+                edges.update(knn_edges(index, sorted(touched), k, min_sim))
+            for src, nbrs in edges.items():
+                store.replace_edges(src, nbrs)
+            log.info("graph: %d nodes re-edged", len(edges))
+
+        stats.edges_total = store.edge_count()
         index.save()
         return stats
 

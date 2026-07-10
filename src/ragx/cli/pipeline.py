@@ -12,7 +12,7 @@ from ragx.core.config import Config, require_root
 from ragx.core.errors import RagxError
 from ragx.core.indexer import run_index
 from ragx.core.query import QueryOptions, run_query, to_files_json, to_query_json
-from ragx.providers.registry import make_embedder
+from ragx.providers.registry import make_embedder, make_generator, make_reranker
 
 
 def register(app: typer.Typer) -> None:
@@ -69,7 +69,11 @@ def query(
             hops=hops,
             explain=explain,
         )
-        out = run_query(root, cfg, make_embedder(cfg), text, opts)
+        out = run_query(
+            root, cfg, make_embedder(cfg), text, opts,
+            generator=make_generator(cfg) if opts.expand else None,
+            reranker=make_reranker(cfg) if opts.rerank else None,
+        )
     except RagxError as exc:
         fail(str(exc))
     if json_out:

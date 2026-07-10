@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import typer
@@ -11,7 +12,7 @@ from ragx.core.config import Config, require_root
 from ragx.core.errors import RagxError
 from ragx.core.eval import evaluate, load_queries
 from ragx.core.query import QueryOptions, run_query
-from ragx.providers.registry import make_embedder
+from ragx.providers.registry import make_embedder, make_generator, make_reranker
 
 _BUILTIN_CONFIGS: dict[str, QueryOptions] = {
     "baseline": QueryOptions(expand=False, graph=False, rerank=False),
@@ -45,13 +46,22 @@ def eval_cmd(
         root = require_root()
         cfg = Config.load(root)
         embedder = make_embedder(cfg)
+        generator = make_generator(cfg) if any(_BUILTIN_CONFIGS[n].expand for n in names) else None
+        reranker = make_reranker(cfg) if any(_BUILTIN_CONFIGS[n].rerank for n in names) else None
     except RagxError as exc:
         fail(str(exc))
 
     def query_fn(text: str, opts: QueryOptions):
-        return run_query(root, cfg, embedder, text, opts)
+        return run_query(
+            root, cfg, embedder, text, opts,
+            generator=generator if opts.expand else None,
+            reranker=reranker if opts.rerank else None,
+        )
 
-    selected = [(name, _BUILTIN_CONFIGS[name]) for name in names]
+    # retrieve chunks deep enough that file-level ranking has >= `top` files to rank
+    selected = [
+        (name, replace(_BUILTIN_CONFIGS[name], top=top * 3)) for name in names
+    ]
     result = evaluate(queries, selected, query_fn, top=top)
 
     if json_out:
