@@ -255,10 +255,18 @@ detects the mismatch and asks you to run a full `ragx index`.
 ## Status
 
 Built and validated through Phase 3 of [the implementation plan](ragx-cli-plan.md):
-skeleton → baseline vector RAG → similarity graph → expansion/rerank/eval. Deferred by design:
-Leiden community detection (`--global` corpus questions), an MCP server (the core/CLI split it
-needs is already enforced), and [temporal weighting](docs/feature-temporal-weighting.md)
-(opt-in `--since`/`--until`/`--temporal`, date cascade filename → git → mtime).
 
-Development: `uv sync --group dev && uv run pytest`. 120 tests; module contracts live in
+- [x] Phase 0 — skeleton: CLI, SQLite schema, provider abstraction
+- [x] Phase 1 — baseline vector RAG: discovery, chunking, embeddings, HNSW
+- [x] Phase 2 — similarity graph: kNN edges, heat-propagation traversal, `inspect`, `--explain`
+- [x] Phase 3 — expansion (multi-query/HyDE), RRF fusion, cross-encoder rerank, `eval` harness
+
+### Future features
+
+- [ ] Leiden community detection over the edge list + `query --global` for corpus-level questions
+- [ ] MCP server — a second thin shell over `ragx.core` (the core/CLI split it needs is already enforced)
+- [ ] [Temporal weighting](docs/feature-temporal-weighting.md) — opt-in `--since`/`--until`/`--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime
+- [ ] PyPI packaging so `uvx ragx` works out of the box
+
+Development: `uv sync --group dev && uv run pytest`. 126 tests; module contracts live in
 `CONTRACTS.md` / `CONTRACTS-PHASE23.md`.
