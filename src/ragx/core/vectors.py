@@ -78,6 +78,15 @@ class VectorIndex:
         results.sort(key=lambda x: x[1], reverse=True)
         return results
 
+    def get_vectors(self, ids: Sequence[int]) -> list[list[float]]:
+        """Stored (normalized) vectors for `ids`, order preserved. Unknown id -> RagxError."""
+        if not ids:
+            return []
+        try:
+            return [list(map(float, v)) for v in self._index.get_items(list(ids))]
+        except RuntimeError as exc:
+            raise RagxError(f"unknown vector id in {list(ids)!r}: {exc}") from exc
+
     def mark_deleted(self, ids: Sequence[int]) -> None:
         known_ids = set(self._index.get_ids_list())
         for i in ids:

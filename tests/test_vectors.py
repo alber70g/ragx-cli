@@ -99,3 +99,14 @@ def test_empty_index_search(tmp_path):
 def test_load_missing_file_raises(tmp_path):
     with pytest.raises(RagxError):
         VectorIndex.load(tmp_path / "missing.hnsw", dim=DIM)
+
+
+def test_get_vectors_roundtrip(tmp_path):
+    idx = VectorIndex.create(tmp_path / "v.hnsw", dim=4)
+    idx.add([10, 20], [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+    vecs = idx.get_vectors([20, 10])
+    assert len(vecs) == 2
+    # cosine space: hnswlib stores normalized vectors; direction must be preserved
+    assert vecs[0][1] > 0.99 and vecs[1][0] > 0.99
+    with pytest.raises(RagxError):
+        idx.get_vectors([999])
