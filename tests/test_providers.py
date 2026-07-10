@@ -166,13 +166,14 @@ def test_make_reranker_disabled_returns_none():
 
 
 def test_make_reranker_missing_extra_returns_none_and_warns(capsys):
-    cfg = _config({"rerank": {"enabled": True, "model": "does-not-matter"}})
-    result = make_reranker(cfg)
-    # sentence-transformers is not a declared dependency of this module's test env;
-    # if it happens to be installed this assertion is skipped.
     try:
         import sentence_transformers  # noqa: F401
+
+        pytest.skip("sentence-transformers installed; missing-extra path not reachable")
     except ImportError:
-        assert result is None
-        captured = capsys.readouterr()
-        assert "rerank" in captured.err.lower() or "sentence-transformers" in captured.err.lower()
+        pass
+    cfg = _config({"rerank": {"enabled": True, "model": "does-not-matter"}})
+    result = make_reranker(cfg)
+    assert result is None
+    captured = capsys.readouterr()
+    assert "rerank" in captured.err.lower() or "sentence-transformers" in captured.err.lower()
