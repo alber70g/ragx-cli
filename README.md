@@ -252,17 +252,15 @@ detects the mismatch and asks you to run a full `ragx index`.
 | `[expansion]` | optional LLM for multi-query/HyDE; reasoning models supported (4096-token budget); `api_key_env=""` |
 | `[rerank]` | `BAAI/bge-reranker-v2-m3` via sentence-transformers (`pip install 'ragx[rerank]'`) |
 
-## Status
+## Features & roadmap
 
-Built and validated through Phase 3 of [the implementation plan](ragx-cli-plan.md):
+Built and validated through Phase 3 of [the implementation plan](ragx-cli-plan.md); unchecked
+items are deferred by design:
 
 - [x] Phase 0 — skeleton: CLI, SQLite schema, provider abstraction
 - [x] Phase 1 — baseline vector RAG: discovery, chunking, embeddings, HNSW
 - [x] Phase 2 — similarity graph: kNN edges, heat-propagation traversal, `inspect`, `--explain`
 - [x] Phase 3 — expansion (multi-query/HyDE), RRF fusion, cross-encoder rerank, `eval` harness
-
-### Future features
-
 - [ ] Leiden community detection over the edge list + `query --global` for corpus-level questions
 - [ ] MCP server — a second thin shell over `ragx.core` (the core/CLI split it needs is already enforced)
 - [ ] [Temporal weighting](docs/feature-temporal-weighting.md) — opt-in `--since`/`--until`/`--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime
