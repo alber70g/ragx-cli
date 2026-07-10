@@ -31,6 +31,18 @@ uses a local sentence-transformers cross-encoder (`ragx[rerank]` extra). Everyth
 
 ---
 
+- [ragx — similarity-graph RAG for your files](#ragx--similarity-graph-rag-for-your-files)
+  - [How it works](#how-it-works)
+    - [Indexing (LLM-free)](#indexing-llm-free)
+    - [Querying](#querying)
+  - [Does it actually help? (benchmarks)](#does-it-actually-help-benchmarks)
+  - [Agent-first conventions](#agent-first-conventions)
+  - [Using ragx from a coding agent (CLAUDE.md / AGENTS.md)](#using-ragx-from-a-coding-agent-claudemd--agentsmd)
+    - [Pointing ragx at your LLM — local or online](#pointing-ragx-at-your-llm--local-or-online)
+  - [Configuration](#configuration)
+  - [Status](#status)
+
+
 ## How it works
 
 ### Indexing (LLM-free)
