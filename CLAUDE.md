@@ -87,9 +87,8 @@ unreachable by vector search or rerank-alone, surfaced only via a hop-1 edge the
 
 ## Gotchas
 
-- Ornith (`mlx-community/Ornith-1.0-35B-3bit`, Albert's required expansion LLM) is a
-  *reasoning* model: answers land in `content` only after thinking; expansion uses
-  max_tokens=4096 and takes ~40 s/call. Don't lower it.
+- Reasoning models as expansion LLM: answers land in `content` only after thinking;
+  expansion uses max_tokens=4096 to leave room for that. Don't lower it.
 - Changing `embeddings.model` invalidates the index; run_query fails loud on manifest
   mismatch; full `ragx-cli index` rebuilds.
 - Chunk ids are SQLite AUTOINCREMENT rowids AND hnswlib labels — never reused after delete.
