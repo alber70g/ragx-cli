@@ -1,7 +1,9 @@
-"""Config: .ragx/config.toml is the single source of truth. Written by `init`, read everywhere."""
+"""Config: .ragx/config.toml per corpus, plus ~/.ragxrc for machine-level provider
+settings (embeddings/expansion/rerank). The rc overrides corpus values — with a warning."""
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,13 @@ import tomli_w
 from ragx.core.errors import NotInitializedError, RagxError
 
 RAGX_DIR = ".ragx"
+PROVIDER_SECTIONS = ("embeddings", "expansion", "rerank")
+
+log = logging.getLogger("ragx.config")
+
+
+def rc_path() -> Path:
+    return Path.home() / ".ragxrc"
 
 DEFAULTS: dict[str, dict[str, Any]] = {
     "corpus": {"include": ["**/*"], "exclude": [], "respect_gitignore": True},
@@ -32,7 +41,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "enabled": True,
         "provider": "openai",
         "base_url": "http://localhost:1234/v1",
-        "model": "mlx-community/Ornith-1.0-35B-3bit",
+        "model": "qwen3.5-9b",
         "variants": 3,
         "hyde": True,
         "api_key_env": "",
@@ -77,20 +86,87 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
-class Config:
-    """Two-level (section.key) config with defaults merged under the file's values."""
+def _coerce(section: str, key: str, value: Any) -> Any:
+    """Coerce a (usually string) value to the type of its DEFAULTS entry."""
+    current = DEFAULTS[section][key]
+    if isinstance(current, bool):
+        return str(value).lower() in ("1", "true", "yes", "on")
+    if isinstance(current, int) and not isinstance(current, bool):
+        return int(value)
+    if isinstance(current, float):
+        return float(value)
+    if isinstance(current, list) and isinstance(value, str):
+        return [v.strip() for v in value.split(",") if v.strip()]
+    return value
 
-    def __init__(self, data: dict[str, dict[str, Any]]):
+
+def load_rc(rc: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Parse ~/.ragxrc. Only provider sections with known keys are allowed — fails loud."""
+    path = rc if rc is not None else rc_path()
+    if not path.exists():
+        return {}
+    with path.open("rb") as f:
+        try:
+            data = tomllib.load(f)
+        except tomllib.TOMLDecodeError as exc:
+            raise RagxError(f"malformed {path}: {exc}") from exc
+    for section, values in data.items():
+        if section not in PROVIDER_SECTIONS:
+            raise RagxError(
+                f"{path}: section [{section}] not allowed — only {', '.join(PROVIDER_SECTIONS)}"
+            )
+        for key in values:
+            if key not in DEFAULTS[section]:
+                raise RagxError(f"{path}: unknown key {section}.{key}")
+    return data
+
+
+def write_rc_value(dotted: str, value: Any, rc: Path | None = None) -> Any:
+    """Set one provider key in ~/.ragxrc (created if missing). Returns the coerced value."""
+    section, _, key = dotted.partition(".")
+    if not key or section not in DEFAULTS or key not in DEFAULTS[section]:
+        raise RagxError(f"unknown config key: {dotted!r}")
+    if section not in PROVIDER_SECTIONS:
+        raise RagxError(
+            f"{dotted!r} is corpus-level — only {', '.join(PROVIDER_SECTIONS)} keys go in ~/.ragxrc"
+        )
+    path = rc if rc is not None else rc_path()
+    data = load_rc(path)
+    coerced = _coerce(section, key, value)
+    data.setdefault(section, {})[key] = coerced
+    with path.open("wb") as f:
+        tomli_w.dump(data, f)
+    return coerced
+
+
+class Config:
+    """Two-level (section.key) config: DEFAULTS < corpus config.toml < ~/.ragxrc.
+
+    `data` is the effective merged view; `file_data` is the raw corpus file so that
+    `save` never bakes rc overrides into the corpus config.
+    """
+
+    def __init__(self, data: dict[str, dict[str, Any]], file_data: dict | None = None):
         self.data = data
+        self.file_data = file_data if file_data is not None else data
 
     @classmethod
-    def load(cls, root: Path) -> Config:
+    def load(cls, root: Path, rc: Path | None = None) -> Config:
         path = config_path(root)
         file_data: dict = {}
         if path.exists():
             with path.open("rb") as f:
                 file_data = tomllib.load(f)
-        return cls(_deep_merge(DEFAULTS, file_data))
+        rc_data = load_rc(rc)
+        for section, values in rc_data.items():
+            for key, rc_value in values.items():
+                corpus_value = file_data.get(section, {}).get(key)
+                if corpus_value is not None and corpus_value != rc_value:
+                    log.warning(
+                        "~/.ragxrc overrides %s.%s: %r (corpus) -> %r (rc)",
+                        section, key, corpus_value, rc_value,
+                    )
+        return cls(_deep_merge(DEFAULTS, _deep_merge(file_data, rc_data)), file_data)
 
     def get(self, dotted: str) -> Any:
         section, _, key = dotted.partition(".")
@@ -105,22 +181,16 @@ class Config:
         section, _, key = dotted.partition(".")
         if not key or section not in DEFAULTS or key not in DEFAULTS[section]:
             raise RagxError(f"unknown config key: {dotted!r}")
-        current = DEFAULTS[section][key]
-        if isinstance(current, bool):
-            value = str(value).lower() in ("1", "true", "yes", "on")
-        elif isinstance(current, int) and not isinstance(current, bool):
-            value = int(value)
-        elif isinstance(current, float):
-            value = float(value)
-        elif isinstance(current, list) and isinstance(value, str):
-            value = [v.strip() for v in value.split(",") if v.strip()]
-        self.data.setdefault(section, {})[key] = value
+        coerced = _coerce(section, key, value)
+        self.data.setdefault(section, {})[key] = coerced
+        if self.file_data is not self.data:
+            self.file_data.setdefault(section, {})[key] = coerced
 
     def save(self, root: Path) -> None:
         path = config_path(root)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as f:
-            tomli_w.dump(self.data, f)
+            tomli_w.dump(_deep_merge(DEFAULTS, self.file_data), f)
 
 
 def write_default_config(root: Path) -> Path:

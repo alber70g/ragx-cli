@@ -40,6 +40,7 @@ uses a local sentence-transformers cross-encoder (`ragx-cli[rerank]` extra). Eve
   - [Agent-first conventions](#agent-first-conventions)
   - [Using ragx-cli from a coding agent (CLAUDE.md / AGENTS.md)](#using-ragx-cli-from-a-coding-agent-claudemd--agentsmd)
     - [Pointing ragx-cli at your LLM — local or online](#pointing-ragx-cli-at-your-llm--local-or-online)
+    - [Machine-level settings: `~/.ragxrc`](#machine-level-settings-ragxrc)
   - [Configuration](#configuration)
   - [Features \& roadmap](#features--roadmap)
 
@@ -238,9 +239,28 @@ Mixed setups are normal — e.g. local Ollama embeddings + online expansion via
 download is unwanted. **Note:** changing the embedding model invalidates the index — ragx-cli
 detects the mismatch and asks you to run a full `ragx-cli index`.
 
+### Machine-level settings: `~/.ragxrc`
+
+Provider settings that belong to the machine rather than the corpus — which embedding
+model, which LLM, which base URL — can live in `~/.ragxrc` (TOML, same shape as
+`config.toml`, restricted to the `[embeddings]`, `[expansion]`, and `[rerank]` sections):
+
+```bash
+ragx-cli config set --global embeddings.model text-embedding-nomic-embed-text-v1.5
+ragx-cli config set --global expansion.model llama3.1
+```
+
+Precedence: built-in defaults < corpus `.ragx/config.toml` < `~/.ragxrc`. The rc
+**overrides** corpus values, and every command warns on stderr when it does, so a
+corpus config never loses silently. Set corpus-specific values without `--global`
+as usual. Other sections (chunking, graph, …) are corpus-level and rejected from
+the rc. The index-invalidation note above applies equally when the rc changes the
+effective embedding model.
+
 ## Configuration
 
-`.ragx/config.toml`, managed via `ragx-cli config get|set`. Key defaults:
+`.ragx/config.toml`, managed via `ragx-cli config get|set` (add `--global` to write
+provider settings to `~/.ragxrc` instead — see above). Key defaults:
 
 | section | defaults |
 |---|---|

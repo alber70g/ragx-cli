@@ -9,7 +9,15 @@ from pathlib import Path
 import typer
 
 from ragx.cli.output import emit_json, fail
-from ragx.core.config import Config, RAGX_DIR, db_path, require_root, write_default_config
+from ragx.core.config import (
+    Config,
+    RAGX_DIR,
+    db_path,
+    rc_path,
+    require_root,
+    write_default_config,
+    write_rc_value,
+)
 from ragx.core.errors import RagxError
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -89,7 +97,18 @@ def config_get(key: str) -> None:
 
 
 @config_app.command("set")
-def config_set(key: str, value: str) -> None:
+def config_set(
+    key: str,
+    value: str,
+    global_: bool = typer.Option(False, "--global", help="write to ~/.ragxrc (provider settings only)"),
+) -> None:
+    if global_:
+        try:
+            coerced = write_rc_value(key, value)
+        except RagxError as exc:
+            fail(str(exc))
+        typer.echo(f"{key} = {coerced} ({rc_path()})")
+        return
     root = _require_root()
     cfg = Config.load(root)
     try:
@@ -97,7 +116,8 @@ def config_set(key: str, value: str) -> None:
     except RagxError as exc:
         fail(str(exc))
     cfg.save(root)
-    typer.echo(f"{key} = {cfg.get(key)}")
+    # reload so the echoed value is the effective one (an rc override warns and wins)
+    typer.echo(f"{key} = {Config.load(root).get(key)}")
 
 
 def main() -> None:

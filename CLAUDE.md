@@ -23,6 +23,11 @@ API contracts for every core module. Deferred feature specs live in `docs/`.
   `http://localhost:1234/v1`. `provider="ollama"` auto-switches to `:11434/v1`.
   Env fallbacks: `OPENAI_BASE_URL` (only while base_url is still the default) and
   `OPENAI_API_KEY` (only when `api_key_env` is unset); explicit config always wins.
+- Machine-level provider settings live in `~/.ragxrc` (TOML; ONLY the embeddings/
+  expansion/rerank sections, unknown keys fail loud). Precedence: DEFAULTS < corpus
+  config.toml < ~/.ragxrc — the rc OVERRIDES corpus values and logs a stderr warning
+  per overridden key. Write via `ragx-cli config set --global <key> <value>`.
+  `Config.save` never bakes rc values into the corpus file.
 - Reranker is always local: sentence-transformers CrossEncoder `BAAI/bge-reranker-v2-m3`
   (optional extra `ragx-cli[rerank]`). LM Studio has NO /v1/rerank endpoint — verified; don't try.
 
@@ -31,7 +36,7 @@ API contracts for every core module. Deferred feature specs live in `docs/`.
 ```
 src/ragx/
   core/            # all logic lives here, CLI-independent
-    config.py      #   .ragx/config.toml load/save, DEFAULTS dict, find_root/require_root
+    config.py      #   .ragx/config.toml + ~/.ragxrc (provider sections; rc wins, warns), DEFAULTS, find_root
     models.py      #   Chunk, ChunkDraft, FileRecord, Edge, ScoredChunk, QueryOutput
     store.py       #   SQLite: files/chunks/edges/meta; replace_edges normalizes src<dst
     vectors.py     #   hnswlib wrapper; soft-delete via JSON sidecar; get_vectors for graph
@@ -110,3 +115,5 @@ unreachable by vector search or rerank-alone, surfaced only via a hop-1 edge the
 `uv sync --group dev --extra rerank` · `uv run pytest -q` (126 pass, ~5 s) ·
 `uv run ruff check src tests` · file soft cap ~150 lines · expected failures raise `RagxError`
 (CLI maps to exit 2). Live smoke: LM Studio must be running with the configured embedding model.
+Changes that impact usage (CLI flags, config keys/precedence, output schemas, install steps)
+must get their representation in README.md in the same change.
