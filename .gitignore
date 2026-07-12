@@ -7,3 +7,5 @@ dist/
 .ragx/
 uv.lock
 .claude/worktrees/
+.lab/
+run.log
