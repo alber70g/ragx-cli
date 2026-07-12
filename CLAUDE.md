@@ -102,6 +102,13 @@ tuning miss), but graph+rerank together deliver the recall win — one Dutch que
 unreachable by vector search or rerank-alone, surfaced only via a hop-1 edge then reranked
 19→4. Ship graph+rerank together; `--no-graph --no-rerank` is the explicit fast mode.
 
+UPDATE 2026-07-13: production embedding model is now `text-embedding-bge-m3` (Q8 GGUF, empty
+doc/query prefixes) — notes-repo corpus config + index flipped in place from the worktree-built
+index (no re-index; nomic backup at `<corpus>/.ragx/backup-nomic-20260713/`). On
+the tuned-params scoped eval corpus (same params as the parameter study above), `rerank` config:
+bge-m3 r@5 .885 / r@10 .962 / MRR .755 vs nomic .846/.923/.717 — beats nomic on every metric,
+mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomic-q4-benchmark-2026-07-12-worktree-eval-results.md`.
+
 ## Gotchas
 
 - Reasoning models as expansion LLM: answers land in `content` only after thinking;

@@ -38,6 +38,7 @@ uses a local sentence-transformers cross-encoder (`ragx-cli[rerank]` extra). Eve
     - [Querying](#querying)
   - [Does it actually help? (benchmarks)](#does-it-actually-help-benchmarks)
     - [Parameter study: what each knob actually does (2026-07)](#parameter-study-what-each-knob-actually-does-2026-07)
+    - [BGE-M3 embedding study (2026-07-12)](#bge-m3-embedding-study-2026-07-12)
   - [Agent-first conventions](#agent-first-conventions)
   - [Using ragx-cli from a coding agent (CLAUDE.md / AGENTS.md)](#using-ragx-cli-from-a-coding-agent-claudemd--agentsmd)
     - [Pointing ragx-cli at your LLM — local or online](#pointing-ragx-cli-at-your-llm--local-or-online)
@@ -236,6 +237,47 @@ ragx-cli config set scoring.gamma_vector 0.1
   Rebuilding is deterministic within a session, but embeddings drift between LM Studio sessions
   (~.04 MRR at identical params). Compare configs on the same build only; the tuned-vs-default
   delta replicated across two independent builds (+13.7% / +14.5% MRR).
+
+### BGE-M3 embedding study (2026-07-12)
+
+A follow-up study asked whether switching the embedding model beats tuning parameters on top of
+the existing one. Setup: same scoped corpus and 26-query EN+NL label set as the parameter study
+above, tuned retrieval params held identical across both legs (`hops=3`, α/β/γ = .9/0/.1),
+reranker unchanged (`BAAI/bge-reranker-v2-m3`). Leg 1 = the production `nomic-embed-text-v1.5`
+(Q4_K_M) index; leg 2 = a full re-index with `text-embedding-bge-m3` (Q8 GGUF), doc/query
+prefixes emptied (BGE-M3 takes none).
+
+| config | recall@5 | recall@10 |   MRR |
+|---|---:|---:|---:|
+| `baseline` — nomic (Q4_K_M)  |  0.846 |  0.846 |  0.561 |
+| `baseline` — bge-m3 (Q8)     | **0.923** | **0.962** | **0.640** |
+| `rerank` — nomic (Q4_K_M)    |  0.846 |  0.923 |  0.717 |
+| `rerank` — bge-m3 (Q8)       | **0.885** | **0.962** | **0.755** |
+
+**Recommendation:** `text-embedding-bge-m3` (Q8 GGUF in LM Studio) with EMPTY `doc_prefix`/
+`query_prefix` is now the recommended embedding model — it beats nomic on every metric at
+identical retrieval params, with the biggest gains on Dutch/multilingual queries (3 of nomic's
+4 baseline misses become hits). Two caveats before treating this as fully settled: the comparison
+ran nomic at Q4_K_M against bge-m3 at Q8, so part of the delta may be quantization quality rather
+than model architecture (an isolating Q8-vs-Q8 run hasn't been run); and BGE-M3's cosine
+distribution sits lower than nomic's (median edge weight .70 vs .81), which makes the fixed graph
+thresholds (`min_edge_sim=0.55`, `query_floor=0.35`) effectively stricter for it — a retune pass
+on the BGE-M3 distribution is a known follow-up, not yet done.
+
+Two sibling questions were studied and rejected as adoption paths right now. **Sparse/lexical**:
+start a lexical retrieval leg with SQLite FTS5/BM25 as an extra RRF seed ranking, not BGE-M3's
+`lexical_weights` — the latter needs a resident PyTorch model at query time for a gain that isn't
+proven necessary here. **ColBERT multi-vector** late interaction: no-adopt for both reranking and
+edge-building — it underperforms the existing cross-encoder, can't be served over ragx's
+OpenAI-compatible HTTP provider architecture, and costs roughly 100x the storage of the existing
+subchunk edge mechanism for a mechanism the subchunk ablation already showed has no headroom on
+this corpus.
+
+Full write-ups: `research/bge-m3-dense-q8-vs-nomic-q4-benchmark-2026-07-12-worktree-eval-results.md`
+(this benchmark), `research/bge-m3-dense-embeddings-as-ragx-provider-multilingual-quality-and-threshold-calibration.md`
+(dense literature review), `research/bge-m3-sparse-lexical-weights-hybrid-retrieval-leg-for-ragx-vs-sqlite-fts5-bm25.md`
+(sparse), `research/bge-m3-colbert-multi-vector-late-interaction-for-ragx-rerank-alternative-and-token-level-graph-edges.md`
+(ColBERT).
 
 ---
 
