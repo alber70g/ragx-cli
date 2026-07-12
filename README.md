@@ -37,6 +37,7 @@ uses a local sentence-transformers cross-encoder (`ragx-cli[rerank]` extra). Eve
     - [Indexing (LLM-free)](#indexing-llm-free)
     - [Querying](#querying)
   - [Does it actually help? (benchmarks)](#does-it-actually-help-benchmarks)
+    - [Parameter study: what each knob actually does (2026-07)](#parameter-study-what-each-knob-actually-does-2026-07)
   - [Agent-first conventions](#agent-first-conventions)
   - [Using ragx-cli from a coding agent (CLAUDE.md / AGENTS.md)](#using-ragx-cli-from-a-coding-agent-claudemd--agentsmd)
     - [Pointing ragx-cli at your LLM — local or online](#pointing-ragx-cli-at-your-llm--local-or-online)
@@ -152,6 +153,73 @@ near-duplicate neighbors (e.g. adjacent meeting notes) displace weaker direct hi
 sweep over decay/floor/weights plateaued below baseline MRR, so this is a property of
 similarity-only edges, not a tuning miss. Conclusion baked into the defaults: **graph and
 rerank ship together**. Use `--no-graph --no-rerank` as the explicit fast mode.
+
+The parameter study below explains the mechanism behind this caveat — and shows that once the
+scoring weights stop putting heat into the final score, the graph win gets much bigger.
+
+### Parameter study: what each knob actually does (2026-07)
+
+A follow-up study swept every traversal, scoring, and graph-build parameter to map sensitivity
+and find better settings. Setup: a scoped subset of the same wiki (`clients/` + `workstreams/`:
+383 files → 720 chunks → 2,848 edges) with a fresh 26-query EN+NL label set.
+
+**Process.** Sweeping through real `eval` runs costs ~9 minutes each, so the study used an
+offline harness (`.lab/harness.py`): one retrieval pass per query plus a text-keyed cross-encoder
+score cache lets any traversal × scoring × edge-filter combination be re-evaluated in seconds —
+the combination step is deterministic post-processing, and rerank scores depend only on
+(query, chunk text). The harness was validated **digit-exact** against the real pipeline before
+use, ~125 configurations were measured in staged rounds (scoring simplex → refinement →
+traversal one-factor-at-a-time → interaction grid → edge-filter simulations), the winning config
+was re-verified with a real `eval` run (again digit-exact), and finally replicated on an
+independently rebuilt index.
+
+**Result** — same-index comparisons, `rerank` config (no expansion) unless noted:
+
+| config | MRR | recall@5 | recall@10 |
+|---|---:|---:|---:|
+| defaults (`hops=2`, α/β/γ = .6/.25/.15) | 0.665 | 0.885 | 0.923 |
+| **tuned (`hops=3`, α/β/γ = .9/0/.1)** | **0.755** | 0.885 | **0.962** |
+
+The +13.7% MRR delta replicated as +14.5% on an independently rebuilt index (absolute numbers
+differ per build — see the measurement caveat below).
+
+Apply the tuned settings to a corpus with:
+
+```bash
+ragx-cli config set traversal.hops 3
+ragx-cli config set scoring.alpha_rerank 0.9
+ragx-cli config set scoring.beta_heat 0.0
+ragx-cli config set scoring.gamma_vector 0.1
+```
+
+**Discoveries**, in decreasing order of impact:
+
+- **α (rerank weight) is the dominant knob.** MRR rises monotonically from α=.6 to a plateau at
+  α≈.85–.9 (+9% relative), with recall flat across the whole range. Heat belongs at **β=0**:
+  once the cross-encoder is trusted, heat in the final score only adds near-duplicate noise —
+  which is exactly why the earlier graph-only sweeps plateaued.
+- **But never α=1.0.** With β=γ=0 the pre-rerank shortlist selector degenerates (it renormalizes
+  β:γ, so every pre-score becomes 0) and MRR collapses to 0.32. Vector + heat pick *which* 100
+  candidates the cross-encoder sees at all — they are load-bearing for shortlist selection even
+  at near-zero final weight. Keep γ > 0.
+- **`hops=3` is the second win, but only after fixing the scoring.** Under default weights,
+  traversal depth is completely inert (heat dilution cancels the candidate gains); under
+  rerank-heavy weights it adds both MRR and recall@10. **`hops=4` degrades**: ~570 candidates
+  overwhelm the fixed rerank shortlist (`RERANK_CAP=100`) and good candidates get evicted before
+  the cross-encoder ever sees them — the cap, not the graph, becomes the binding constraint.
+- **Graph = recall channel, cross-encoder = precision channel.** At identical tuned scoring,
+  removing the graph keeps MRR (0.71) but drops recall@10 by 7.7 points. The graph's job is to
+  put reachable targets in front of the reranker; the reranker's job is to rank them.
+- **Everything else is inert or already optimal**: `decay` (.3–.7), `query_floor` (.2–.5),
+  `max_frontier` (50–300), and `min_edge_sim` (up to .7) don't move metrics; `k=8` is bracketed
+  optimal from both sides (k=4/6 lose recall, a real k=12 rebuild was no better).
+- **LLM expansion buys recall, not ranking.** The full pipeline at default params reached the
+  same recall@10 that `hops=3` provides for free, at ~40 s/query for a local reasoning model.
+  On tuned params expansion still stacked (+.03 MRR) — worth it only when latency doesn't matter.
+- **Measurement caveat: index rebuilds are not reproducible across embedding-server sessions.**
+  Rebuilding is deterministic within a session, but embeddings drift between LM Studio sessions
+  (~.04 MRR at identical params). Compare configs on the same build only; the tuned-vs-default
+  delta replicated across two independent builds (+13.7% / +14.5% MRR).
 
 ---
 
