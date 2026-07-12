@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import sqlite3
+from array import array
 from pathlib import Path
 from typing import Sequence
 
 from ragx.core.models import Chunk, ChunkDraft, FileRecord
+
+# v2 adds subchunks (sub-chunk embedding vectors for graph edge construction)
+SUBCHUNK_SCHEMA = """
+CREATE TABLE subchunks(id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+                       vector BLOB NOT NULL);
+CREATE INDEX subchunks_chunk ON subchunks(chunk_id);
+"""
 
 SCHEMA = """
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -20,7 +29,7 @@ CREATE INDEX chunks_file ON chunks(file_path);
 CREATE TABLE edges(src INTEGER NOT NULL, dst INTEGER NOT NULL, weight REAL NOT NULL,
                    PRIMARY KEY(src, dst)) WITHOUT ROWID;
 CREATE INDEX edges_dst ON edges(dst);
-"""
+""" + SUBCHUNK_SCHEMA
 
 
 class Store:
@@ -31,7 +40,11 @@ class Store:
         user_version = self.conn.execute("PRAGMA user_version").fetchone()[0]
         if user_version == 0:
             self.conn.executescript(SCHEMA)
-            self.conn.execute("PRAGMA user_version = 1")
+            self.conn.execute("PRAGMA user_version = 2")
+            self.conn.commit()
+        elif user_version == 1:
+            self.conn.executescript(SUBCHUNK_SCHEMA)
+            self.conn.execute("PRAGMA user_version = 2")
             self.conn.commit()
 
     def close(self) -> None:
@@ -126,6 +139,21 @@ class Store:
 
     def chunk_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+
+    # -- subchunks (native float32 vector blobs; rows cascade with their chunk) --
+
+    def insert_subchunk_vectors(self, chunk_id: int, vectors: Sequence[Sequence[float]]) -> None:
+        self.conn.executemany(
+            "INSERT INTO subchunks(chunk_id, vector) VALUES (?, ?)",
+            [(chunk_id, array("f", v).tobytes()) for v in vectors],
+        )
+        self.conn.commit()
+
+    def all_subchunk_vectors(self) -> list[tuple[int, bytes]]:
+        """(chunk_id, float32 blob) for every sub-chunk, ordered by chunk then insertion."""
+        return self.conn.execute(
+            "SELECT chunk_id, vector FROM subchunks ORDER BY chunk_id, id"
+        ).fetchall()
 
     # -- edges (undirected; stored normalized src < dst) -----------------
 

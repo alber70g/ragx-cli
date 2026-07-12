@@ -1,4 +1,4 @@
-from ragx.core.chunking import chunk_text
+from ragx.core.chunking import chunk_text, subchunk_texts
 
 
 def _assert_slice_invariant(text: str, drafts) -> None:
@@ -97,3 +97,32 @@ def test_tiny_fragments_merge_into_neighbor():
     drafts = chunk_text(text, "x.md", size_tokens=200, overlap=0.15)
     assert len(drafts) >= 2
     assert all(len(d.text.strip()) >= 100 for d in drafts)
+
+
+def test_subchunk_short_text_returns_whole():
+    assert subchunk_texts("Short text.", 128) == ["Short text."]
+
+
+def test_subchunk_join_reproduces_text_exactly():
+    text = ("One sensible sentence sits here. " * 40 + "\n\n") * 3
+    parts = subchunk_texts(text, 128)
+    assert len(parts) > 1
+    assert "".join(parts) == text
+
+
+def test_subchunk_windows_respect_target_and_floor():
+    text = "A sentence of medium length appears right here. " * 60
+    parts = subchunk_texts(text, 128)
+    target = 128 * 4
+    assert len(parts) > 1
+    # windows end on sentence boundaries at/below target; merged tail may exceed a bit
+    assert all(len(p) <= target * 2 for p in parts)
+    # no noisy tiny fragments (research floor: sub-units >= ~50 tokens)
+    assert all(len(p.strip()) >= target // 4 for p in parts)
+
+
+def test_subchunk_long_sentence_overruns_to_next_boundary():
+    text = "x" * 3000 + ". " + "Regular tail sentence follows. " * 30
+    parts = subchunk_texts(text, 128)
+    assert "".join(parts) == text
+    assert parts[0].startswith("x" * 100)  # unbreakable run stays intact

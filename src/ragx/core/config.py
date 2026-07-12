@@ -24,7 +24,13 @@ def rc_path() -> Path:
 DEFAULTS: dict[str, dict[str, Any]] = {
     "corpus": {"include": ["**/*"], "exclude": [], "respect_gitignore": True},
     "chunking": {"size_tokens": 800, "overlap": 0.15},
-    "graph": {"k": 8, "min_edge_sim": 0.55},
+    "graph": {
+        "k": 8,
+        "min_edge_sim": 0.55,
+        "edge_source": "chunk",  # "chunk" (whole-chunk cosine, k per chunk) | "subchunk" (k per SUB-chunk)
+        "subchunk_size_tokens": 128,
+        "near_dup_sim": 0.9,  # subchunk mode: drop edges whose whole-chunk cosine is already >= this
+    },
     "traversal": {"hops": 2, "decay": 0.5, "query_floor": 0.35, "max_frontier": 150},
     "fusion": {"rrf_k": 60, "per_query_top": 20},
     "scoring": {"alpha_rerank": 0.6, "beta_heat": 0.25, "gamma_vector": 0.15},

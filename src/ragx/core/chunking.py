@@ -15,6 +15,7 @@ MIN_CHUNK_CHARS = 100  # fragments below this merge into a neighbor (may nudge i
 
 _HEADING_RE = re.compile(r"^#{1,6} .*$", re.MULTILINE)
 _CODE_BOUNDARY_RE = re.compile(r"^(?:def|class|function|fn|func)\b", re.MULTILINE)
+_SENTENCE_BOUNDARY_RE = re.compile(r"[.!?]\s+|\n+")
 
 
 def _find_boundary(s: str, start: int, hard_end: int) -> int:
@@ -141,6 +142,44 @@ def _merge_tiny_ranges(text: str, ranges: list[tuple[int, int]], min_chars: int)
         out[1] = (out[0][0], out[1][1])
         out.pop(0)
     return out
+
+
+def subchunk_texts(text: str, size_tokens: int = 128) -> list[str]:
+    """Split a chunk's text into contiguous sentence-aligned windows of ~size_tokens,
+    for sub-chunk edge construction. Concatenating the result reproduces `text` exactly;
+    texts near or below the target return [text] unchanged.
+    """
+    target = size_tokens * 4
+    if len(text) <= int(target * 1.5):
+        return [text]
+    cuts = [m.end() for m in _SENTENCE_BOUNDARY_RE.finditer(text)]
+    parts: list[str] = []
+    pos, n = 0, len(text)
+    while pos < n:
+        limit = pos + target
+        if limit >= n:
+            parts.append(text[pos:])
+            break
+        in_range = [c for c in cuts if pos < c <= limit]
+        if in_range:
+            end = in_range[-1]
+        else:  # one very long sentence: cut at the next boundary (or the end)
+            beyond = [c for c in cuts if c > limit]
+            end = beyond[0] if beyond else n
+        parts.append(text[pos:end])
+        pos = end
+    # windows below the floor embed noisily (research: keep sub-units >= ~50 tokens)
+    min_part = max(MIN_CHUNK_CHARS, target // 4)
+    merged: list[str] = []
+    for p in parts:
+        if merged and len(p.strip()) < min_part:
+            merged[-1] += p
+        else:
+            merged.append(p)
+    if len(merged) >= 2 and len(merged[0].strip()) < min_part:
+        merged[1] = merged[0] + merged[1]
+        merged.pop(0)
+    return merged
 
 
 def chunk_text(text: str, path: str, size_tokens: int = 800, overlap: float = 0.15) -> list[ChunkDraft]:

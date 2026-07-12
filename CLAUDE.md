@@ -17,8 +17,9 @@ API contracts for every core module. Deferred feature specs live in `docs/`.
 
 - Python 3.12, managed with **uv** (`uv sync --group dev`, `uv run pytest`). NOT Bun/TS —
   deliberate exception, see plan §2.
-- typer (CLI), hnswlib (HNSW vector index, cosine), SQLite (chunks/edges/manifest, WAL),
-  httpx (+respx in tests), xxhash (incremental hashing), pathspec (gitignore globs).
+- typer (CLI), hnswlib (HNSW vector index, cosine), numpy (sub-chunk edge math), SQLite
+  (chunks/edges/subchunks/manifest, WAL), httpx (+respx in tests), xxhash (incremental
+  hashing), pathspec (gitignore globs).
 - Providers speak **OpenAI-compatible HTTP**. Local default: LM Studio at
   `http://localhost:1234/v1`. `provider="ollama"` auto-switches to `:11434/v1`.
   Env fallbacks: `OPENAI_BASE_URL` (only while base_url is still the default) and
@@ -41,8 +42,10 @@ src/ragx/
     store.py       #   SQLite: files/chunks/edges/meta; replace_edges normalizes src<dst
     vectors.py     #   hnswlib wrapper; soft-delete via JSON sidecar; get_vectors for graph
     discovery.py   #   file walk, root-level .gitignore, binary/size/junk-dir filters, xxh64
-    chunking.py    #   markdown/code/recursive splitters; byte-exact slices; tiny-fragment merge
-    graph.py       #   knn_edges + affected_ids (incremental edge maintenance)
+    chunking.py    #   markdown/code/recursive splitters; byte-exact slices; tiny-fragment merge;
+                   #   subchunk_texts (sentence-aligned windows for subchunk edge mode)
+    graph.py       #   knn_edges + subchunk_knn_edges (max over sub-chunk pairs, near-dup guard)
+                   #   + affected_ids (incremental edge maintenance)
     traversal.py   #   propagate_heat: max-aggregation, query floor, frontier cap, trace
     expansion.py   #   one LLM call -> variants + HyDE; NEVER raises (degrades to no-op)
     fusion.py      #   Reciprocal Rank Fusion
@@ -54,7 +57,7 @@ src/ragx/
                    # st_reranker.py; registry.py factories (env-var + api_key_env resolution)
   cli/             # thin shells only: app.py (init/status/config + registration),
                    # pipeline.py (index/query), inspect_cmd.py, eval_cmd.py, output.py
-tests/             # 126 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
+tests/             # 151 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
 ```
 
 ## Flows
@@ -64,6 +67,20 @@ skip node_modules/.venv/hidden/binaries/>2MB) → xxhash diff (`--changed` = inc
 = full rebuild) → chunk (~800 tok target, chunks are exact byte slices, sub-100-char fragments
 merge into neighbors) → embed batched → HNSW add → kNN edges per new chunk (k=8, cos ≥ 0.55)
 + recompute edge lists of pre-existing neighbors that appear in new lists.
+Experimental `graph.edge_source="subchunk"` (default `"chunk"`): chunks additionally split into
+~128-tok sentence-aligned sub-chunks, embedded separately (float32 blobs in the SQLite
+`subchunks` table, cascade-deleted with their chunk; NOT in the query-time HNSW); edge weight =
+max cos over sub-chunk pairs; edges with whole-chunk cos ≥ `graph.near_dup_sim` (0.9) dropped.
+Query side untouched. In subchunk mode `graph.k` means links per SUB-chunk (no per-chunk cap —
+edge budget scales with concept count; graph gets ~2.2x denser). The manifest guards
+`edge_source`/`subchunk_size_tokens` like the embedding model — `--changed` after a flip fails
+loud. Rationale + literature: `research/fine-grained-sub-chunk-edges-*.md`. MEASURED 2026-07-12
+(`.lab` experiments #10–#11): on the scoped notes eval corpus the dense concept graph at hops2
+TIES the tuned chunk-graph baseline (r@10 .923 / MRR .718 vs .717) at ~4.5x index embed cost —
+no win because the corpus's short single-topic chunks have no dilution headroom (near-dup guard
+pruned ~3 edges). hops3 + uncapped budget floods RERANK_CAP (candidates 643). Verdict: default
+stays `edge_source="chunk"`; subchunk is opt-in for corpora with long multi-concept chunks, and
+if used, drop traversal to hops=2.
 
 **Query** (`ragx-cli query "..."`): optional expansion (1 LLM call, strict-JSON parse, graceful
 no-op on failure) → embed all variants, HNSW top-20 each → RRF merge = seeds → heat propagation
@@ -111,7 +128,7 @@ unreachable by vector search or rerank-alone, surfaced only via a hop-1 edge the
 
 ## Dev loop
 
-`uv sync --group dev --extra rerank` · `uv run pytest -q` (126 pass, ~5 s) ·
+`uv sync --group dev --extra rerank` · `uv run pytest -q` (151 pass, ~5 s) ·
 `uv run ruff check src tests` · file soft cap ~150 lines · expected failures raise `RagxError`
 (CLI maps to exit 2). Live smoke: LM Studio must be running with the configured embedding model.
 Changes that impact usage (CLI flags, config keys/precedence, output schemas, install steps)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+from array import array
 from pathlib import Path
 
 import pytest
@@ -140,3 +142,46 @@ def test_context_manager_closes(tmp_path: Path):
         s.set_meta("k", "v")
     with Store(path) as s2:
         assert s2.get_meta("k") == "v"
+
+
+def test_subchunk_vectors_roundtrip_and_cascade_delete(store: Store):
+    store.upsert_file(make_file("a.py", 1))
+    [cid] = store.insert_chunks("a.py", [make_draft()])
+    store.insert_subchunk_vectors(cid, [[1.0, 0.0], [0.0, 1.0]])
+
+    rows = store.all_subchunk_vectors()
+    assert [c for c, _ in rows] == [cid, cid]
+    assert list(array("f", rows[0][1])) == [1.0, 0.0]
+    assert list(array("f", rows[1][1])) == [0.0, 1.0]
+
+    store.delete_file("a.py")  # files -> chunks -> subchunks cascade
+    assert store.all_subchunk_vectors() == []
+
+
+def test_v1_database_migrates_to_v2(tmp_path: Path):
+    # a pre-subchunk (user_version=1) database gets the subchunks table on open
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript("""
+CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE files(path TEXT PRIMARY KEY, content_hash TEXT NOT NULL,
+                   mtime REAL NOT NULL, chunk_count INTEGER NOT NULL);
+CREATE TABLE chunks(id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT NOT NULL REFERENCES files(path) ON DELETE CASCADE,
+                    text TEXT NOT NULL, byte_start INTEGER NOT NULL, byte_end INTEGER NOT NULL,
+                    line_start INTEGER NOT NULL, line_end INTEGER NOT NULL);
+CREATE INDEX chunks_file ON chunks(file_path);
+CREATE TABLE edges(src INTEGER NOT NULL, dst INTEGER NOT NULL, weight REAL NOT NULL,
+                   PRIMARY KEY(src, dst)) WITHOUT ROWID;
+CREATE INDEX edges_dst ON edges(dst);
+""")
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+
+    with Store(path) as s:
+        assert s.conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        s.upsert_file(make_file("a.py", 1))
+        [cid] = s.insert_chunks("a.py", [make_draft()])
+        s.insert_subchunk_vectors(cid, [[0.5, 0.5]])
+        assert len(s.all_subchunk_vectors()) == 1

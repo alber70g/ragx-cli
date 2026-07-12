@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
-from ragx.core.chunking import chunk_text
+import numpy as np
+
+from ragx.core.chunking import chunk_text, subchunk_texts
 from ragx.core.config import Config, db_path, vectors_path
 from ragx.core.discovery import discover_files, hash_file
-from ragx.core.errors import ManifestMismatchError
-from ragx.core.graph import affected_ids, knn_edges
-from ragx.core.models import FileRecord
+from ragx.core.errors import ManifestMismatchError, RagxError
+from ragx.core.graph import affected_ids, knn_edges, subchunk_knn_edges
+from ragx.core.models import ChunkDraft, FileRecord
 from ragx.core.store import Store
 from ragx.core.vectors import VectorIndex
 from ragx.providers.base import Embedder
@@ -31,11 +35,17 @@ class IndexStats:
 
 def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool = False) -> IndexStats:
     """Index the corpus at `root`. Full rebuild by default; hash-diff when changed_only."""
+    edge_source = cfg.get("graph.edge_source")
+    if edge_source not in ("chunk", "subchunk"):
+        raise RagxError(f"graph.edge_source must be 'chunk' or 'subchunk', got {edge_source!r}")
+    sub_size = cfg.get("graph.subchunk_size_tokens")
     with Store(db_path(root)) as store:
-        _check_manifest(store, embedder, allow_rewrite=not changed_only)
+        _check_manifest(store, embedder, edge_source, sub_size, allow_rewrite=not changed_only)
         dim = embedder.dimension()
         store.set_meta("embedding_model", embedder.model)
         store.set_meta("embedding_dim", str(dim))
+        store.set_meta("edge_source", edge_source)
+        store.set_meta("subchunk_size_tokens", str(sub_size))
 
         current = {
             rel: hash_file(root / rel)
@@ -84,6 +94,8 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool
             ids = store.insert_chunks(path, drafts)
             vectors = embedder.embed_documents([d.text for d in drafts])
             index.add(ids, vectors)
+            if edge_source == "subchunk":
+                _embed_subchunks(store, embedder, ids, drafts, vectors, sub_size)
             new_ids.extend(ids)
             stats.files_indexed += 1
             stats.chunks_added += len(ids)
@@ -91,10 +103,15 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool
 
         if new_ids:
             k, min_sim = cfg.get("graph.k"), cfg.get("graph.min_edge_sim")
-            edges = knn_edges(index, new_ids, k, min_sim)
+            if edge_source == "subchunk":
+                edge_fn = _subchunk_edge_fn(store, index, dim, k, min_sim, cfg.get("graph.near_dup_sim"))
+            else:
+                def edge_fn(ids_: Sequence[int]) -> dict[int, list[tuple[int, float]]]:
+                    return knn_edges(index, ids_, k, min_sim)
+            edges = edge_fn(new_ids)
             touched = affected_ids(edges)
             if touched:  # incremental: refresh edge lists of pre-existing neighbors
-                edges.update(knn_edges(index, sorted(touched), k, min_sim))
+                edges.update(edge_fn(sorted(touched)))
             for src, nbrs in edges.items():
                 store.replace_edges(src, nbrs)
             log.info("graph: %d nodes re-edged", len(edges))
@@ -104,13 +121,74 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool
         return stats
 
 
-def _check_manifest(store: Store, embedder: Embedder, *, allow_rewrite: bool) -> None:
-    prev = store.get_meta("embedding_model")
-    if prev and prev != embedder.model and not allow_rewrite:
-        raise ManifestMismatchError(
-            f"index was built with {prev!r} but config says {embedder.model!r}; "
-            "run a full `ragx-cli index` to rebuild"
+def _check_manifest(
+    store: Store, embedder: Embedder, edge_source: str, sub_size: int, *, allow_rewrite: bool
+) -> None:
+    checks = [("embedding_model", embedder.model), ("edge_source", edge_source)]
+    if edge_source == "subchunk":  # size only shapes the graph when subchunk edges are on
+        checks.append(("subchunk_size_tokens", str(sub_size)))
+    for key, current in checks:
+        prev = store.get_meta(key)
+        if prev and prev != str(current) and not allow_rewrite:
+            raise ManifestMismatchError(
+                f"index was built with {key}={prev!r} but config says {current!r}; "
+                "run a full `ragx-cli index` to rebuild"
+            )
+
+
+def _unit(vec: Sequence[float]) -> list[float]:
+    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+    return [v / norm for v in vec]
+
+
+def _embed_subchunks(
+    store: Store,
+    embedder: Embedder,
+    ids: Sequence[int],
+    drafts: Sequence[ChunkDraft],
+    chunk_vectors: Sequence[Sequence[float]],
+    sub_size: int,
+) -> None:
+    """Split each chunk into sub-chunks and persist their unit vectors.
+    A chunk that stays whole reuses its own embedding — no extra provider call."""
+    to_embed: list[str] = []
+    spans: list[tuple[int, int, int]] = []  # (chunk_id, start, end) into to_embed
+    for cid, draft, cvec in zip(ids, drafts, chunk_vectors):
+        subs = subchunk_texts(draft.text, sub_size)
+        if len(subs) == 1:
+            store.insert_subchunk_vectors(cid, [_unit(cvec)])
+        else:
+            spans.append((cid, len(to_embed), len(to_embed) + len(subs)))
+            to_embed.extend(subs)
+    if to_embed:
+        vectors = embedder.embed_documents(to_embed)
+        for cid, start, end in spans:
+            store.insert_subchunk_vectors(cid, [_unit(v) for v in vectors[start:end]])
+
+
+def _subchunk_edge_fn(
+    store: Store, index: VectorIndex, dim: int, k: int, min_sim: float, near_dup_sim: float
+):
+    """Load the sub-chunk matrix + whole-chunk vectors once; return an edge function."""
+    rows = store.all_subchunk_vectors()
+    parents = [cid for cid, _ in rows]
+    matrix = (
+        np.frombuffer(b"".join(blob for _, blob in rows), dtype=np.float32).reshape(len(rows), dim)
+        if rows
+        else np.zeros((0, dim), dtype=np.float32)
+    )
+    chunk_ids = sorted(set(parents))
+    if len(chunk_ids) != store.chunk_count():
+        raise RagxError(
+            "sub-chunk vectors missing for some chunks (index predates graph.edge_source="
+            "'subchunk'); run a full `ragx-cli index` to rebuild"
         )
+    chunk_vectors = dict(zip(chunk_ids, index.get_vectors(chunk_ids)))
+
+    def edge_fn(ids_: Sequence[int]) -> dict[int, list[tuple[int, float]]]:
+        return subchunk_knn_edges(parents, matrix, ids_, chunk_vectors, k, min_sim, near_dup_sim)
+
+    return edge_fn
 
 
 def _open_vectors(root: Path, dim: int) -> VectorIndex:

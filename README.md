@@ -55,6 +55,22 @@ embedded, and stored in an HNSW index. The similarity graph then falls out almos
 one kNN pass over the vectors that are already in memory — each chunk gets edges to its top-k
 nearest neighbors above a similarity floor.
 
+Experimental: `graph.edge_source = "subchunk"` derives edge weights from sentence-aligned
+**sub-chunks** instead of whole-chunk cosine — each chunk is split into ~`subchunk_size_tokens`
+windows, embedded separately (stored in SQLite, never in the query-time HNSW), and the edge
+weight between two chunks becomes the *max* similarity over their sub-chunk pairs, so a chunk
+mixing several concepts gets one sharp edge per concept instead of a diluted average. Edges
+between near-duplicate chunks (whole-chunk cosine ≥ `near_dup_sim`) are dropped — those are the
+measured precision-killers. Costs roughly 5–10× more embedding calls at index time; retrieval
+units, traversal, and query flow are unchanged. Switching `edge_source` (or the sub-chunk size)
+requires a full re-index; `--changed` fails loud on the mismatch. Literature grounding:
+`research/fine-grained-sub-chunk-edges-with-coarse-chunk-nodes-multi-granularity-graph-rag-literature-validation.md`.
+In this mode `k` counts links per *sub-chunk* with no per-chunk cap, so the graph is denser and
+shallower traversal suffices. Measured on the tuned eval corpus (2026-07): at `hops=2` it ties
+the chunk-edge baseline exactly (same recall, same MRR) at ~4.5× the indexing cost — that
+corpus's short, single-topic chunks leave no concept-dilution headroom to exploit. Worth trying
+only on corpora with long, genuinely multi-concept chunks (use `hops=2`); the default stays `"chunk"`.
+
 ```mermaid
 flowchart TD
     A[files] --> B["discover + hash<br/>(gitignore, binary/junk filters,<br/>xxhash for incremental)"]
@@ -333,7 +349,7 @@ provider settings to `~/.ragxrc` instead — see above). Key defaults:
 | section | defaults |
 |---|---|
 | `[chunking]` | `size_tokens=800`, `overlap=0.15` |
-| `[graph]` | `k=8`, `min_edge_sim=0.55` |
+| `[graph]` | `k=8`, `min_edge_sim=0.55`, `edge_source="chunk"`, `subchunk_size_tokens=128`, `near_dup_sim=0.9` |
 | `[traversal]` | `hops=2`, `decay=0.5`, `query_floor=0.35`, `max_frontier=150` |
 | `[fusion]` | `rrf_k=60`, `per_query_top=20` |
 | `[scoring]` | `alpha_rerank=0.6`, `beta_heat=0.25`, `gamma_vector=0.15` |
