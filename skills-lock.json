@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "zvec": {
+      "source": "zvec-ai/zvec-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/zvec/SKILL.md",
+      "computedHash": "5c4cdd4c96bd343b37ef530ea128b1e0d8e5f45f19aac40827d599c2b1bfd221"
+    }
+  }
+}
