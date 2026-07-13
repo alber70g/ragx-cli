@@ -72,6 +72,10 @@ the chunk-edge baseline exactly (same recall, same MRR) at ~4.5× the indexing c
 corpus's short, single-topic chunks leave no concept-dilution headroom to exploit. Worth trying
 only on corpora with long, genuinely multi-concept chunks (use `hops=2`); the default stays `"chunk"`.
 
+After edge construction, a Leiden partition (`graspologic-native`, seeded, deterministic) is
+computed over the whole edge list every index run and stored read-only — see
+[`[communities]`](#configuration) and `inspect communities`/`inspect community`.
+
 ```mermaid
 flowchart TD
     A[files] --> B["discover + hash<br/>(gitignore, binary/junk filters,<br/>xxhash for incremental)"]
@@ -289,7 +293,8 @@ Full write-ups: `research/bge-m3-dense-q8-vs-nomic-q4-benchmark-2026-07-12-workt
 - Every chunk carries `file`, `line_start/line_end`, `byte_start/byte_end` — agents jump to the
   exact source location and read the full text themselves (JSON chunk text is truncated).
 - `--files-only` aggregates chunk scores per file (sum of top-3) — the mode coding agents use most.
-- `ragx-cli query -` reads the query from stdin; `ragx-cli inspect chunk|file|neighbors` debugs the graph.
+- `ragx-cli query -` reads the query from stdin; `ragx-cli inspect chunk|file|neighbors|communities|community`
+  debugs the graph.
 
 ## Using ragx-cli from a coding agent (CLAUDE.md / AGENTS.md)
 
@@ -393,6 +398,7 @@ provider settings to `~/.ragxrc` instead — see above). Key defaults:
 | `[chunking]` | `size_tokens=800`, `overlap=0.15` |
 | `[graph]` | `k=8`, `min_edge_sim=0.55`, `edge_source="chunk"`, `subchunk_size_tokens=128`, `near_dup_sim=0.9` |
 | `[traversal]` | `hops=2`, `decay=0.5`, `query_floor=0.35`, `max_frontier=150` |
+| `[communities]` | `resolution=1.0`, `seed=42` — recomputed every index run; changing these never invalidates the index |
 | `[fusion]` | `rrf_k=60`, `per_query_top=20` |
 | `[scoring]` | `alpha_rerank=0.6`, `beta_heat=0.25`, `gamma_vector=0.15` |
 | `[embeddings]` | `provider="openai"`, `base_url="http://localhost:1234/v1"`, prefixes for nomic-style models, `api_key_env=""` |
@@ -408,7 +414,8 @@ unchecked ones are next up:
 - [x] **Baseline vector RAG**: discovery, chunking, embeddings, HNSW search, incremental `--changed`
 - [x] **Similarity graph**: kNN edge construction, heat-propagation traversal, `inspect`, `--explain`
 - [x] **Quality & measurement**: multi-query/HyDE expansion, RRF fusion, cross-encoder rerank, `eval` harness
-- [ ] **Communities**: Leiden detection over the edge list, `query --global` for corpus-level questions
+- [x] **Communities**: Leiden detection over the edge list (index-time, read-only via status/inspect)
+- [ ] **query --global** for corpus-level questions
 - [ ] **MCP server**: a second thin shell over `ragx.core` (the core/CLI split it needs is already enforced)
 - [ ] **[Temporal weighting](docs/feature-temporal-weighting.md)**: opt-in `--since`/`--until`/`--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime
 - [ ] **Release**: publish to PyPI as `ragx-cli` (plain `ragx` is name-blocked, too similar to an existing project) so `uvx ragx-cli` works out of the box

@@ -176,3 +176,48 @@ def test_changed_only_fails_loud_on_edge_source_flip(tmp_path):
     cfg.set("graph.edge_source", "subchunk")
     with pytest.raises(ManifestMismatchError):
         run_index(tmp_path, cfg, emb, changed_only=True)
+
+
+def test_index_persists_communities(tmp_path):
+    make_corpus(tmp_path)
+    (tmp_path / "pets2.md").write_text("# More pets\n\nDogs bark at cats. Cats purr at dogs.\n")
+    write_default_config(tmp_path)
+    cfg = Config.load(tmp_path)
+    cfg.set("graph.min_edge_sim", "0.3")  # fake embeddings are coarse
+    emb = FakeEmbedder()
+
+    stats = run_index(tmp_path, cfg, emb)
+    with Store(db_path(tmp_path)) as store:
+        assert stats.communities_total == store.community_count() >= 1
+        edged_chunk_ids = {src for src, _, _ in store.all_edges()} | {
+            dst for _, dst, _ in store.all_edges()
+        }
+        members = set()
+        for cid, _ in store.community_sizes():
+            members.update(store.community_members(cid))
+        assert edged_chunk_ids <= members
+
+
+def test_changed_reindex_recomputes_communities(tmp_path):
+    make_corpus(tmp_path)
+    (tmp_path / "pets2.md").write_text("# More pets\n\nDogs bark at cats. Cats purr at dogs.\n")
+    write_default_config(tmp_path)
+    cfg = Config.load(tmp_path)
+    cfg.set("graph.min_edge_sim", "0.3")
+    emb = FakeEmbedder()
+    run_index(tmp_path, cfg, emb)
+
+    with Store(db_path(tmp_path)) as store:
+        deleted_ids = set(store.chunk_ids_for_file("space.md"))
+    (tmp_path / "space.md").unlink()
+    run_index(tmp_path, cfg, emb, changed_only=True)
+
+    with Store(db_path(tmp_path)) as store:
+        members = set()
+        for cid, _ in store.community_sizes():
+            members.update(store.community_members(cid))
+        assert not (deleted_ids & members)
+        edged_chunk_ids = {src for src, _, _ in store.all_edges()} | {
+            dst for _, dst, _ in store.all_edges()
+        }
+        assert edged_chunk_ids <= members

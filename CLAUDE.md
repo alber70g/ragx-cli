@@ -46,6 +46,7 @@ src/ragx/
                    #   subchunk_texts (sentence-aligned windows for subchunk edge mode)
     graph.py       #   knn_edges + subchunk_knn_edges (max over sub-chunk pairs, near-dup guard)
                    #   + affected_ids (incremental edge maintenance)
+    communities.py #   leiden_communities: pure, seeded, recomputed whole every index run
     traversal.py   #   propagate_heat: max-aggregation, query floor, frontier cap, trace
     expansion.py   #   one LLM call -> variants + HyDE; NEVER raises (degrades to no-op)
     fusion.py      #   Reciprocal Rank Fusion
@@ -126,7 +127,9 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 
 ## What's next / deferred
 
-- Phase 4 (plan §5): Leiden communities over the edge list, `query --global`.
+- Phase 4 (plan §5): Leiden community creation is DONE (index-time, `communities.py`,
+  read-only via `status`/`inspect communities`/`inspect community`). Remaining: community
+  labels, `query --global` for corpus-level questions.
 - Phase 5: MCP server as a second thin shell over `ragx.core` (split already enforced).
 - Temporal weighting: full decided spec in `docs/feature-temporal-weighting.md` — opt-in
   `--since/--until/--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime,

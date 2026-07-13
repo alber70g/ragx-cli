@@ -84,3 +84,25 @@ def test_status_without_init(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["status"])
     assert result.exit_code == 2
+
+
+def test_status_reports_communities(tmp_path, monkeypatch):
+    from ragx.core.config import db_path
+    from ragx.core.models import ChunkDraft, FileRecord
+    from ragx.core.store import Store
+
+    runner.invoke(app, ["init", str(tmp_path)])
+    with Store(db_path(tmp_path)) as store:
+        store.upsert_file(FileRecord(path="a.py", content_hash="h1", mtime=1.0, chunk_count=1))
+        [cid] = store.insert_chunks(
+            "a.py",
+            [ChunkDraft(text="x", byte_start=0, byte_end=1, line_start=1, line_end=1)],
+        )
+        store.replace_communities({cid: 0})
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["status", "--json"])
+    assert result.exit_code == 0
+    doc = json.loads(result.stdout)
+    assert doc["schema"] == "ragx.status.v1"
+    assert doc["communities"] == 1

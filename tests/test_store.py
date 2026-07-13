@@ -158,8 +158,8 @@ def test_subchunk_vectors_roundtrip_and_cascade_delete(store: Store):
     assert store.all_subchunk_vectors() == []
 
 
-def test_v1_database_migrates_to_v2(tmp_path: Path):
-    # a pre-subchunk (user_version=1) database gets the subchunks table on open
+def test_v1_database_migrates_to_v3(tmp_path: Path):
+    # a pre-subchunk (user_version=1) database gets the subchunks + communities tables on open
     path = tmp_path / "old.db"
     conn = sqlite3.connect(str(path))
     conn.executescript("""
@@ -180,8 +180,84 @@ CREATE INDEX edges_dst ON edges(dst);
     conn.close()
 
     with Store(path) as s:
-        assert s.conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert s.conn.execute("PRAGMA user_version").fetchone()[0] == 3
         s.upsert_file(make_file("a.py", 1))
         [cid] = s.insert_chunks("a.py", [make_draft()])
         s.insert_subchunk_vectors(cid, [[0.5, 0.5]])
         assert len(s.all_subchunk_vectors()) == 1
+        s.replace_communities({cid: 0})
+        assert s.community_count() == 1
+
+
+def test_v2_database_migrates_to_v3(tmp_path: Path):
+    # a pre-communities (user_version=2) database gets the communities table on open
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript("""
+CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE files(path TEXT PRIMARY KEY, content_hash TEXT NOT NULL,
+                   mtime REAL NOT NULL, chunk_count INTEGER NOT NULL);
+CREATE TABLE chunks(id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT NOT NULL REFERENCES files(path) ON DELETE CASCADE,
+                    text TEXT NOT NULL, byte_start INTEGER NOT NULL, byte_end INTEGER NOT NULL,
+                    line_start INTEGER NOT NULL, line_end INTEGER NOT NULL);
+CREATE INDEX chunks_file ON chunks(file_path);
+CREATE TABLE edges(src INTEGER NOT NULL, dst INTEGER NOT NULL, weight REAL NOT NULL,
+                   PRIMARY KEY(src, dst)) WITHOUT ROWID;
+CREATE INDEX edges_dst ON edges(dst);
+CREATE TABLE subchunks(id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+                       vector BLOB NOT NULL);
+CREATE INDEX subchunks_chunk ON subchunks(chunk_id);
+""")
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+
+    with Store(path) as s:
+        assert s.conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        s.upsert_file(make_file("a.py", 1))
+        [cid] = s.insert_chunks("a.py", [make_draft()])
+        s.replace_communities({cid: 0})
+        assert s.community_count() == 1
+
+
+def test_replace_communities_roundtrip_and_full_overwrite(store: Store):
+    store.upsert_file(make_file("a.py"))
+    ids = store.insert_chunks("a.py", [make_draft("one"), make_draft("two", start=3)])
+    store.replace_communities({ids[0]: 0, ids[1]: 0})
+    assert store.community_count() == 1
+    assert store.community_sizes() == [(0, 2)]
+    assert store.community_members(0) == sorted(ids)
+
+    # full-recompute strategy: second call leaves no trace of the first mapping
+    store.upsert_file(make_file("b.py"))
+    [b_id] = store.insert_chunks("b.py", [make_draft("three", start=6)])
+    store.replace_communities({ids[0]: 0, b_id: 1})
+    assert store.community_count() == 2
+    assert store.community_members(0) == [ids[0]]
+    assert store.community_members(1) == [b_id]
+    assert ids[1] not in store.community_members(0)
+
+
+def test_communities_cascade_delete(store: Store):
+    store.upsert_file(make_file("a.py"))
+    ids = store.insert_chunks("a.py", [make_draft("one"), make_draft("two", start=3)])
+    store.replace_communities({ids[0]: 0, ids[1]: 0})
+    assert store.community_count() == 1
+
+    store.delete_file("a.py")
+    assert store.community_count() == 0
+    assert store.community_members(0) == []
+
+
+def test_all_edges_sorted(store: Store):
+    store.upsert_file(make_file("a.py"))
+    ids = store.insert_chunks(
+        "a.py",
+        [make_draft("one"), make_draft("two", start=3), make_draft("three", start=6)],
+    )
+    lo, mid, hi = sorted(ids)
+    store.replace_edges(hi, [(lo, 0.5)])
+    store.replace_edges(mid, [(lo, 0.4)])
+    assert store.all_edges() == [(lo, mid, 0.4), (lo, hi, 0.5)]

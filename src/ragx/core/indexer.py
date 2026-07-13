@@ -11,6 +11,7 @@ from typing import Sequence
 import numpy as np
 
 from ragx.core.chunking import chunk_text, subchunk_texts
+from ragx.core.communities import leiden_communities
 from ragx.core.config import Config, db_path, vectors_path
 from ragx.core.discovery import discover_files, hash_file
 from ragx.core.errors import ManifestMismatchError, RagxError
@@ -31,6 +32,7 @@ class IndexStats:
     chunks_added: int = 0
     chunks_deleted: int = 0
     edges_total: int = 0
+    communities_total: int = 0
 
 
 def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool = False) -> IndexStats:
@@ -115,6 +117,15 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool
             for src, nbrs in edges.items():
                 store.replace_edges(src, nbrs)
             log.info("graph: %d nodes re-edged", len(edges))
+
+        assignments = leiden_communities(
+            store.all_edges(),
+            resolution=cfg.get("communities.resolution"),
+            seed=cfg.get("communities.seed"),
+        )
+        store.replace_communities(assignments)
+        stats.communities_total = len(set(assignments.values()))
+        log.info("communities: %d over %d chunks", stats.communities_total, len(assignments))
 
         stats.edges_total = store.edge_count()
         index.save()

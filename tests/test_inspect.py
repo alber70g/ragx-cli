@@ -157,3 +157,47 @@ def test_inspect_neighbors_unknown_id_exit_2(tmp_path, monkeypatch):
     result = runner.invoke(app, ["inspect", "neighbors", "9999"])
     assert result.exit_code == 2
     assert "unknown chunk id" in result.output
+
+
+def test_inspect_communities_and_drilldown(tmp_path, monkeypatch):
+    ids = _seed(tmp_path)
+    with Store(db_path(tmp_path)) as store:
+        store.replace_communities({ids["a0"]: 0, ids["a1"]: 0, ids["c0"]: 1})
+    monkeypatch.chdir(tmp_path)
+    app = _make_app()
+
+    result = runner.invoke(app, ["inspect", "communities", "--json"])
+    assert result.exit_code == 0
+    doc = json.loads(result.stdout)
+    assert doc["schema"] == "ragx.inspect.communities.v1"
+    assert doc["count"] == 2
+    # size desc: community 0 (2 members) before community 1 (1 member)
+    assert [c["community_id"] for c in doc["communities"]] == [0, 1]
+    assert doc["communities"][0]["size"] == 2
+    assert doc["communities"][0]["files"] == ["a.py"]
+
+    result = runner.invoke(app, ["inspect", "community", "0", "--json"])
+    assert result.exit_code == 0
+    doc = json.loads(result.stdout)
+    assert doc["schema"] == "ragx.inspect.community.v1"
+    assert doc["community_id"] == 0
+    assert doc["size"] == 2
+    assert doc["members"] == [
+        {"id": ids["a0"], "file": "a.py", "line_start": 1, "line_end": 1},
+        {"id": ids["a1"], "file": "a.py", "line_start": 2, "line_end": 2},
+    ]
+
+    result = runner.invoke(app, ["inspect", "community", "9999"])
+    assert result.exit_code == 2
+    assert "unknown community id" in result.output
+
+
+def test_inspect_communities_empty_exit_1(tmp_path, monkeypatch):
+    _seed(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    app = _make_app()
+
+    result = runner.invoke(app, ["inspect", "communities", "--json"])
+    assert result.exit_code == 1
+    doc = json.loads(result.stdout)
+    assert doc["communities"] == []

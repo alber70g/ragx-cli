@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from array import array
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from ragx.core.models import Chunk, ChunkDraft, FileRecord
 
@@ -15,6 +15,13 @@ CREATE TABLE subchunks(id INTEGER PRIMARY KEY AUTOINCREMENT,
                        chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
                        vector BLOB NOT NULL);
 CREATE INDEX subchunks_chunk ON subchunks(chunk_id);
+"""
+
+# v3 adds communities (Leiden partition over the edge list; recomputed every index run)
+COMMUNITY_SCHEMA = """
+CREATE TABLE communities(chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+                         community_id INTEGER NOT NULL);
+CREATE INDEX communities_cid ON communities(community_id);
 """
 
 SCHEMA = """
@@ -29,7 +36,7 @@ CREATE INDEX chunks_file ON chunks(file_path);
 CREATE TABLE edges(src INTEGER NOT NULL, dst INTEGER NOT NULL, weight REAL NOT NULL,
                    PRIMARY KEY(src, dst)) WITHOUT ROWID;
 CREATE INDEX edges_dst ON edges(dst);
-""" + SUBCHUNK_SCHEMA
+""" + SUBCHUNK_SCHEMA + COMMUNITY_SCHEMA
 
 
 class Store:
@@ -40,11 +47,15 @@ class Store:
         user_version = self.conn.execute("PRAGMA user_version").fetchone()[0]
         if user_version == 0:
             self.conn.executescript(SCHEMA)
-            self.conn.execute("PRAGMA user_version = 2")
+            self.conn.execute("PRAGMA user_version = 3")
             self.conn.commit()
         elif user_version == 1:
-            self.conn.executescript(SUBCHUNK_SCHEMA)
-            self.conn.execute("PRAGMA user_version = 2")
+            self.conn.executescript(SUBCHUNK_SCHEMA + COMMUNITY_SCHEMA)
+            self.conn.execute("PRAGMA user_version = 3")
+            self.conn.commit()
+        elif user_version == 2:
+            self.conn.executescript(COMMUNITY_SCHEMA)
+            self.conn.execute("PRAGMA user_version = 3")
             self.conn.commit()
 
     def close(self) -> None:
@@ -187,3 +198,32 @@ class Store:
 
     def edge_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+
+    def all_edges(self) -> list[tuple[int, int, float]]:
+        return self.conn.execute("SELECT src, dst, weight FROM edges ORDER BY src, dst").fetchall()
+
+    # -- communities (Leiden partition; recomputed whole every index run) --
+
+    def replace_communities(self, assignments: Mapping[int, int]) -> None:
+        self.conn.execute("DELETE FROM communities")
+        self.conn.executemany(
+            "INSERT INTO communities(chunk_id, community_id) VALUES (?, ?)",
+            list(assignments.items()),
+        )
+        self.conn.commit()
+
+    def community_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(DISTINCT community_id) FROM communities").fetchone()[0]
+
+    def community_sizes(self) -> list[tuple[int, int]]:
+        return self.conn.execute(
+            "SELECT community_id, COUNT(*) FROM communities "
+            "GROUP BY community_id ORDER BY COUNT(*) DESC, community_id ASC"
+        ).fetchall()
+
+    def community_members(self, community_id: int) -> list[int]:
+        rows = self.conn.execute(
+            "SELECT chunk_id FROM communities WHERE community_id = ? ORDER BY chunk_id",
+            (community_id,),
+        ).fetchall()
+        return [row[0] for row in rows]

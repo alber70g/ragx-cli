@@ -48,16 +48,16 @@ def init(path: Path = typer.Argument(Path("."))) -> None:
     typer.echo(f"created {cfg_path}")
 
 
-def _counts(root: Path) -> tuple[int, int, int]:
+def _counts(root: Path) -> tuple[int, int, int, int]:
     db = db_path(root)
     if not db.exists():
-        return 0, 0, 0
+        return 0, 0, 0, 0
     try:
         from ragx.core.store import Store
     except ImportError:
-        return 0, 0, 0
+        return 0, 0, 0, 0
     with Store(db) as store:
-        return store.file_count(), store.chunk_count(), store.edge_count()
+        return store.file_count(), store.chunk_count(), store.edge_count(), store.community_count()
 
 
 @app.command()
@@ -65,7 +65,7 @@ def status(json_out: bool = typer.Option(False, "--json")) -> None:
     """Show corpus root, embedding config, and index counts."""
     root = _require_root()
     cfg = Config.load(root)
-    files, chunks, edges = _counts(root)
+    files, chunks, edges, communities = _counts(root)
     doc = {
         "schema": "ragx.status.v1",
         "root": str(root),
@@ -74,13 +74,14 @@ def status(json_out: bool = typer.Option(False, "--json")) -> None:
         "files": files,
         "chunks": chunks,
         "edges": edges,
+        "communities": communities,
     }
     if json_out:
         emit_json(doc)
     else:
         typer.echo(f"root: {doc['root']}")
         typer.echo(f"embedding: {doc['embedding_provider']}/{doc['embedding_model']}")
-        typer.echo(f"files: {files}  chunks: {chunks}  edges: {edges}")
+        typer.echo(f"files: {files}  chunks: {chunks}  edges: {edges}  communities: {communities}")
     if files == 0 and chunks == 0 and edges == 0:
         raise typer.Exit(code=1)
 

@@ -120,3 +120,49 @@ def inspect_neighbors(chunk_id: int, json_out: bool = typer.Option(False, "--jso
             typer.echo(f"  {n['id']}  {n['weight']:.4f}  {n['file']}:{n['line_start']}-{n['line_end']}")
     if not neighbors:
         raise typer.Exit(code=1)
+
+
+@inspect_app.command("communities")
+def inspect_communities(json_out: bool = typer.Option(False, "--json")) -> None:
+    """List Leiden communities, largest first, with a file preview per community."""
+    with _open_store() as store:
+        sizes = store.community_sizes()
+        communities = []
+        for cid, size in sizes:
+            chunks = store.get_chunks(store.community_members(cid))
+            files = list(dict.fromkeys(c.file_path for c in chunks))[:3]
+            communities.append({"community_id": cid, "size": size, "files": files})
+    doc = {"schema": "ragx.inspect.communities.v1", "count": len(communities), "communities": communities}
+    if json_out:
+        emit_json(doc)
+    else:
+        for c in communities:
+            typer.echo(f"community {c['community_id']}  size {c['size']}  {', '.join(c['files'])}")
+    if not communities:
+        raise typer.Exit(code=1)
+
+
+@inspect_app.command("community")
+def inspect_community(community_id: int, json_out: bool = typer.Option(False, "--json")) -> None:
+    """Show a single community's members."""
+    with _open_store() as store:
+        ids = store.community_members(community_id)
+        if not ids:
+            fail(f"unknown community id: {community_id}")
+        chunks = store.get_chunks(ids)
+    members = [
+        {"id": c.id, "file": c.file_path, "line_start": c.line_start, "line_end": c.line_end}
+        for c in chunks
+    ]
+    doc = {
+        "schema": "ragx.inspect.community.v1",
+        "community_id": community_id,
+        "size": len(members),
+        "members": members,
+    }
+    if json_out:
+        emit_json(doc)
+    else:
+        typer.echo(f"community {community_id}  ({doc['size']} members)")
+        for m in members:
+            typer.echo(f"  {m['id']}  {m['file']}:{m['line_start']}-{m['line_end']}")

@@ -32,6 +32,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "near_dup_sim": 0.9,  # subchunk mode: drop edges whose whole-chunk cosine is already >= this
     },
     "traversal": {"hops": 2, "decay": 0.5, "query_floor": 0.35, "max_frontier": 150},
+    "communities": {"resolution": 1.0, "seed": 42},
     "fusion": {"rrf_k": 60, "per_query_top": 20},
     "scoring": {"alpha_rerank": 0.6, "beta_heat": 0.25, "gamma_vector": 0.15},
     "embeddings": {
