@@ -367,8 +367,49 @@ Mixed setups are normal — e.g. local Ollama embeddings + online expansion via
 `ragx-cli config set expansion.base_url https://openrouter.ai/api/v1` +
 `ragx-cli config set expansion.api_key_env OPENROUTER_API_KEY`. The reranker is always local
 (sentence-transformers); disable it with `ragx-cli config set rerank.enabled false` if the model
-download is unwanted. **Note:** changing the embedding model invalidates the index — ragx-cli
+download is unwanted (can't reach huggingface.co? — see the next section). **Note:** changing the embedding model invalidates the index — ragx-cli
 detects the mismatch and asks you to run a full `ragx-cli index`.
+
+### Reranker on restricted networks (no huggingface.co)
+
+The reranker model (`BAAI/bge-reranker-v2-m3`, ~2.3 GB) is downloaded from huggingface.co on
+first use. If your network blocks huggingface.co, ragx-cli degrades gracefully — queries run
+without reranking and a warning explains why — but you have three ways to get reranking working:
+
+**Option A — copy the model and point `rerank.model` at the directory** (recommended).
+On any machine with access:
+
+```bash
+pip install -U huggingface_hub   # or: uv tool install huggingface_hub
+hf download BAAI/bge-reranker-v2-m3 --local-dir bge-reranker-v2-m3
+```
+
+Transfer the `bge-reranker-v2-m3/` directory to the restricted machine (it must contain
+`config.json`, `model.safetensors`, and the tokenizer files — `hf download` fetches all of
+them), then:
+
+```bash
+ragx-cli config set --global rerank.model /absolute/path/to/bge-reranker-v2-m3
+```
+
+sentence-transformers loads a local directory without any network access. `--global` writes
+to `~/.ragxrc` so the machine-local path doesn't end up in a shared corpus `config.toml`.
+
+**Option B — use a HuggingFace mirror.** `huggingface_hub` honors the `HF_ENDPOINT`
+environment variable, so if a mirror is reachable (e.g. an internal artifact proxy, or a
+public mirror such as `https://hf-mirror.com`):
+
+```bash
+HF_ENDPOINT=https://hf-mirror.com ragx-cli query "..."
+```
+
+**Option C — pre-seed the HuggingFace cache.** Copy
+`~/.cache/huggingface/hub/models--BAAI--bge-reranker-v2-m3/` from a machine where the model
+has already been used to the same path on the restricted machine. Set `HF_HUB_OFFLINE=1` to
+stop `huggingface_hub` from attempting update checks against huggingface.co.
+
+If none of these are workable, `ragx-cli config set rerank.enabled false` turns reranking
+off explicitly (scoring weights renormalize automatically).
 
 ### Machine-level settings: `~/.ragxrc`
 

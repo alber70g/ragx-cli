@@ -180,6 +180,26 @@ def test_make_reranker_missing_extra_returns_none_and_warns(capsys):
     assert "rerank" in captured.err.lower() or "sentence-transformers" in captured.err.lower()
 
 
+def test_make_reranker_model_load_failure_returns_none_and_warns(monkeypatch, capsys):
+    """A download/network failure inside CrossEncoder degrades to no-rerank with a hint."""
+    import sys
+    import types
+
+    class _FailingCrossEncoder:
+        def __init__(self, model):
+            raise OSError("Connection to huggingface.co failed")
+
+    fake = types.ModuleType("sentence_transformers")
+    fake.CrossEncoder = _FailingCrossEncoder
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake)
+    cfg = _config({"rerank": {"enabled": True, "model": "BAAI/bge-reranker-v2-m3"}})
+    result = make_reranker(cfg)
+    assert result is None
+    err = capsys.readouterr().err
+    assert "huggingface.co" in err
+    assert "HF_ENDPOINT" in err
+
+
 def test_api_key_env_resolved_and_sent(monkeypatch):
     monkeypatch.setenv("RAGX_TEST_KEY", "sk-test-123")
     cfg = _config({"embeddings": {"api_key_env": "RAGX_TEST_KEY"}})

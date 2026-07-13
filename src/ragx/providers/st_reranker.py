@@ -20,7 +20,16 @@ class STReranker:
                 "sentence-transformers not installed — install with: uv tool install ragx-cli --with ragx-cli[rerank]"
             ) from exc
         self.model = model
-        self._encoder = CrossEncoder(model)
+        try:
+            self._encoder = CrossEncoder(model)
+        except Exception as exc:
+            raise RagxError(
+                f"failed to load reranker model {model!r}: {exc} — if huggingface.co is "
+                "unreachable from this network, point rerank.model at a local copy of the "
+                "model directory, set HF_ENDPOINT to a reachable mirror, or disable "
+                "reranking (rerank.enabled false); see README 'Reranker on restricted "
+                "networks (no huggingface.co)'"
+            ) from exc
 
     def score(self, query: str, texts: Sequence[str]) -> list[float]:
         pairs = [[query, text] for text in texts]
