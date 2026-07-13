@@ -20,7 +20,7 @@ that can justify every result via the exact graph path that produced it.
 
 ```bash
 uv tool install ragx-cli --with ragx-cli[rerank]  # install and use `ragx-cli`
-ragx-cli init                  # create .ragx/ with config.toml next to your corpus
+ragx-cli init                  # create .ragx/ with config.toml next to your corpus (interactive on a TTY; --yes for defaults)
 ragx-cli index                 # chunk -> embed -> HNSW + kNN similarity graph
 ragx-cli query "why did we switch build tools?" --json --files-only
 ragx-cli index --changed       # incremental: only new/modified/deleted files
@@ -432,7 +432,17 @@ effective embedding model.
 ## Configuration
 
 `.ragx/config.toml`, managed via `ragx-cli config get|set` (add `--global` to write
-provider settings to `~/.ragxrc` instead — see above). Key defaults:
+provider settings to `~/.ragxrc` instead — see above).
+
+`ragx-cli init` is **interactive when run on a TTY**: it probes the default LM Studio
+(`localhost:1234`) and Ollama (`localhost:11434`) ports, lists the models each server
+reports, and walks through embeddings (provider/base URL/model/API-key env var), query
+expansion (enable + model — likely thinking/reasoning models are listed last, since a
+non-thinking model is the better expansion choice; detection is a best-effort name
+heuristic, the APIs expose no capability flag), and corpus include/exclude
+(gitignore-style globs, comma-separated). Every prompt is pre-filled with the defaults
+below — Enter accepts them all. With piped stdin (agents), `--yes`, or
+`--no-interactive`, it writes the defaults unchanged, exactly as before. Key defaults:
 
 | section | defaults |
 |---|---|

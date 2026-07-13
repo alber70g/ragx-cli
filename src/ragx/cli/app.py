@@ -8,10 +8,13 @@ from pathlib import Path
 
 import typer
 
+from ragx.cli.init_prompt import collect_answers
 from ragx.cli.output import emit_json, fail
 from ragx.core.config import (
+    DEFAULTS,
     Config,
     RAGX_DIR,
+    config_path,
     db_path,
     rc_path,
     require_root,
@@ -39,12 +42,33 @@ def _require_root() -> Path:
 
 
 @app.command()
-def init(path: Path = typer.Argument(Path("."))) -> None:
-    """Create .ragx/ with a default config at PATH (default: cwd)."""
+def init(
+    path: Path = typer.Argument(Path(".")),
+    yes: bool = typer.Option(False, "--yes", "-y", help="skip prompts and write the default config"),
+    interactive: bool | None = typer.Option(
+        None,
+        "--interactive/--no-interactive",
+        help="force prompts on/off (default: prompt only when stdin is a TTY)",
+    ),
+) -> None:
+    """Create .ragx/ with a config at PATH (default: cwd).
+
+    On a TTY this walks through embeddings, query-expansion, and corpus include/exclude
+    settings (probing local LM Studio/Ollama for models); piped stdin or --yes writes
+    the defaults unchanged.
+    """
     root = path.resolve()
     if (root / RAGX_DIR).exists():
         fail(f"{root / RAGX_DIR} already exists")
-    cfg_path = write_default_config(root)
+    ask = (interactive if interactive is not None else sys.stdin.isatty()) and not yes
+    if ask:
+        cfg = Config({k: dict(v) for k, v in DEFAULTS.items()})
+        for key, value in collect_answers().items():
+            cfg.set(key, value)
+        cfg.save(root)
+        cfg_path = config_path(root)
+    else:
+        cfg_path = write_default_config(root)
     typer.echo(f"created {cfg_path}")
 
 

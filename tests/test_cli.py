@@ -1,13 +1,33 @@
 from __future__ import annotations
 
 import json
+import tomllib
 
+import httpx
+import respx
 from typer.testing import CliRunner
 
 from ragx.cli.app import app
 from ragx.core.config import RAGX_DIR, Config
 
 runner = CliRunner()
+
+LMSTUDIO_MODELS_URL = "http://localhost:1234/v1/models"
+OLLAMA_MODELS_URL = "http://localhost:11434/v1/models"
+
+
+def _mock_models(url: str, models: list[str] | None) -> None:
+    """Mock a /v1/models probe: a model list, or a connection failure when None."""
+    route = respx.get(url)
+    if models is None:
+        route.mock(side_effect=httpx.ConnectError("down"))
+    else:
+        route.mock(return_value=httpx.Response(200, json={"data": [{"id": m} for m in models]}))
+
+
+def _read_config(tmp_path):
+    with (tmp_path / RAGX_DIR / "config.toml").open("rb") as f:
+        return tomllib.load(f)
 
 
 def test_init_fresh(tmp_path):
@@ -22,6 +42,62 @@ def test_init_already_initialized(tmp_path):
     result = runner.invoke(app, ["init", str(tmp_path)])
     assert result.exit_code == 2
     assert "already exists" in result.output
+
+
+@respx.mock
+def test_init_interactive_detects_server_and_applies_answers(tmp_path):
+    _mock_models(LMSTUDIO_MODELS_URL, ["text-embedding-bge-m3", "qwen3.5-9b", "deepseek-r1-8b"])
+    _mock_models(OLLAMA_MODELS_URL, None)
+    answers = "\n".join(
+        [
+            "",  # embeddings provider -> detected default (openai)
+            "",  # base URL -> detected LM Studio URL
+            "1",  # embedding model by number -> text-embedding-bge-m3
+            "",  # api key env -> empty (local)
+            "",  # enable expansion -> default yes
+            "",  # expansion provider -> follows embeddings
+            "",  # expansion base URL -> follows embeddings
+            "",  # expansion model -> default qwen3.5-9b (non-thinking listed first)
+            "",  # expansion api key env
+            "**/*.md,docs/**",  # corpus include globs
+            "drafts/**",  # corpus exclude globs
+            "n",  # respect .gitignore
+        ]
+    )
+    result = runner.invoke(app, ["init", str(tmp_path), "--interactive"], input=answers + "\n")
+    assert result.exit_code == 0, result.output
+    assert "detected LM Studio" in result.output
+    assert "thinking/reasoning models listed last" in result.output
+    data = _read_config(tmp_path)
+    assert data["embeddings"]["provider"] == "openai"
+    assert data["embeddings"]["base_url"] == "http://localhost:1234/v1"
+    assert data["embeddings"]["model"] == "text-embedding-bge-m3"
+    assert data["expansion"]["enabled"] is True
+    assert data["expansion"]["model"] == "qwen3.5-9b"
+    assert data["corpus"]["include"] == ["**/*.md", "docs/**"]
+    assert data["corpus"]["exclude"] == ["drafts/**"]
+    assert data["corpus"]["respect_gitignore"] is False
+
+
+@respx.mock
+def test_init_interactive_no_servers_expansion_off(tmp_path):
+    _mock_models(LMSTUDIO_MODELS_URL, None)
+    _mock_models(OLLAMA_MODELS_URL, None)
+    # provider, base URL, model, api key env (defaults), expansion off, corpus defaults
+    answers = "\n\n\n\nn\n\n\n\n"
+    result = runner.invoke(app, ["init", str(tmp_path), "--interactive"], input=answers)
+    assert result.exit_code == 0, result.output
+    data = _read_config(tmp_path)
+    assert data["embeddings"]["model"] == "text-embedding-nomic-embed-text-v1.5@q4_k_m"
+    assert data["expansion"]["enabled"] is False
+    assert data["corpus"]["include"] == ["**/*"]
+
+
+def test_init_yes_skips_prompts(tmp_path):
+    result = runner.invoke(app, ["init", str(tmp_path), "--yes", "--interactive"])
+    assert result.exit_code == 0
+    data = _read_config(tmp_path)
+    assert data["embeddings"]["provider"] == "openai"
 
 
 def test_config_get_set_roundtrip(tmp_path, monkeypatch):
