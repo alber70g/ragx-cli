@@ -3,7 +3,7 @@ class RagxError(Exception):
 
 
 class NotInitializedError(RagxError):
-    """No .ragx/ directory found at or above the working directory."""
+    """No ragx.toml or .ragx/ directory found at or above the working directory."""
 
 
 class ManifestMismatchError(RagxError):

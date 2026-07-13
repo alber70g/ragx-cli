@@ -13,7 +13,7 @@ from ragx.cli.output import emit_json, fail
 from ragx.core.config import (
     DEFAULTS,
     Config,
-    RAGX_DIR,
+    CONFIG_FILE,
     config_path,
     db_path,
     rc_path,
@@ -41,6 +41,13 @@ def _require_root() -> Path:
         fail(str(exc))
 
 
+def _load_config(root: Path) -> Config:
+    try:
+        return Config.load(root)
+    except RagxError as exc:
+        fail(str(exc))
+
+
 @app.command()
 def init(
     path: Path = typer.Argument(Path(".")),
@@ -51,15 +58,15 @@ def init(
         help="force prompts on/off (default: prompt only when stdin is a TTY)",
     ),
 ) -> None:
-    """Create .ragx/ with a config at PATH (default: cwd).
+    """Create a ragx.toml config at PATH (default: cwd).
 
     On a TTY this walks through embeddings, query-expansion, and corpus include/exclude
     settings (probing local LM Studio/Ollama for models); piped stdin or --yes writes
     the defaults unchanged.
     """
     root = path.resolve()
-    if (root / RAGX_DIR).exists():
-        fail(f"{root / RAGX_DIR} already exists")
+    if (root / CONFIG_FILE).exists():
+        fail(f"{root / CONFIG_FILE} already exists")
     ask = (interactive if interactive is not None else sys.stdin.isatty()) and not yes
     if ask:
         cfg = Config({k: dict(v) for k, v in DEFAULTS.items()})
@@ -88,7 +95,7 @@ def _counts(root: Path) -> tuple[int, int, int, int]:
 def status(json_out: bool = typer.Option(False, "--json")) -> None:
     """Show corpus root, embedding config, and index counts."""
     root = _require_root()
-    cfg = Config.load(root)
+    cfg = _load_config(root)
     files, chunks, edges, communities = _counts(root)
     doc = {
         "schema": "ragx.status.v1",
@@ -113,7 +120,7 @@ def status(json_out: bool = typer.Option(False, "--json")) -> None:
 @config_app.command("get")
 def config_get(key: str) -> None:
     root = _require_root()
-    cfg = Config.load(root)
+    cfg = _load_config(root)
     try:
         value = cfg.get(key)
     except RagxError as exc:
@@ -135,7 +142,7 @@ def config_set(
         typer.echo(f"{key} = {coerced} ({rc_path()})")
         return
     root = _require_root()
-    cfg = Config.load(root)
+    cfg = _load_config(root)
     try:
         cfg.set(key, value)
     except RagxError as exc:

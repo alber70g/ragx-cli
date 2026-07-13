@@ -8,7 +8,7 @@ optionally at query time, for query expansion.
 It works on any directory of text: pair it with a
 [Karpathy-style LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f),
 an OpenWiki instance, an Obsidian-style notes vault, or any other knowledgebase repository or
-arbitrary docs/code tree — `ragx-cli init` drops a `.ragx/` directory next to the files and
+arbitrary docs/code tree — `ragx-cli init` drops a `ragx.toml` next to the files and
 everything else stays untouched. LLM-maintained wikis and ragx-cli are complementary: the wiki
 distills knowledge into curated pages, while ragx-cli gives agents fast graph-backed retrieval
 over those pages (and the raw sources beside them) without re-reading everything per question.
@@ -20,15 +20,16 @@ that can justify every result via the exact graph path that produced it.
 
 ```bash
 uv tool install ragx-cli --with ragx-cli[rerank]  # install and use `ragx-cli`
-ragx-cli init                  # create .ragx/ with config.toml next to your corpus (interactive on a TTY; --yes for defaults)
+ragx-cli init                  # create ragx.toml next to your corpus (interactive on a TTY; --yes for defaults)
 ragx-cli index                 # chunk -> embed -> HNSW + kNN similarity graph
 ragx-cli query "why did we switch build tools?" --json --files-only
 ragx-cli index --changed       # incremental: only new/modified/deleted files
 ```
 
 Runs against any OpenAI-compatible embedding endpoint (LM Studio, Ollama, OpenAI). Reranking
-uses a local sentence-transformers cross-encoder (`ragx-cli[rerank]` extra). Everything lives in a
-`.ragx/` directory beside your files — like `.git/`, delete it and the corpus is untouched.
+uses a local sentence-transformers cross-encoder (`ragx-cli[rerank]` extra). Config lives in
+`ragx.toml` at the corpus root (commit it); all index data lives in a `.ragx/` directory beside
+your files (gitignore it) — like `.git/`, delete `.ragx/` and the corpus is untouched.
 
 ---
 
@@ -361,7 +362,7 @@ Precedence rules (per section, embeddings and expansion independently):
   `OPENAI_BASE_URL` applies only while the config still holds the built-in default.
 - API key: `ragx-cli config set <section>.api_key_env MY_VAR` names an env var to read (and fails
   loudly if that variable is unset); without it, `OPENAI_API_KEY` is used when present.
-  Secrets themselves never go in `config.toml`.
+  Secrets themselves never go in `ragx.toml`.
 
 Mixed setups are normal — e.g. local Ollama embeddings + online expansion via
 `ragx-cli config set expansion.base_url https://openrouter.ai/api/v1` +
@@ -415,14 +416,14 @@ off explicitly (scoring weights renormalize automatically).
 
 Provider settings that belong to the machine rather than the corpus — which embedding
 model, which LLM, which base URL — can live in `~/.ragxrc` (TOML, same shape as
-`config.toml`, restricted to the `[embeddings]`, `[expansion]`, and `[rerank]` sections):
+`ragx.toml`, restricted to the `[embeddings]`, `[expansion]`, and `[rerank]` sections):
 
 ```bash
 ragx-cli config set --global embeddings.model text-embedding-nomic-embed-text-v1.5
 ragx-cli config set --global expansion.model llama3.1
 ```
 
-Precedence: built-in defaults < corpus `.ragx/config.toml` < `~/.ragxrc`. The rc
+Precedence: built-in defaults < corpus `ragx.toml` < `~/.ragxrc`. The rc
 **overrides** corpus values, and every command warns on stderr when it does, so a
 corpus config never loses silently. Set corpus-specific values without `--global`
 as usual. Other sections (chunking, graph, …) are corpus-level and rejected from
@@ -431,8 +432,14 @@ effective embedding model.
 
 ## Configuration
 
-`.ragx/config.toml`, managed via `ragx-cli config get|set` (add `--global` to write
-provider settings to `~/.ragxrc` instead — see above).
+`ragx.toml` at the corpus root, managed via `ragx-cli config get|set` (add `--global` to
+write provider settings to `~/.ragxrc` instead — see above). The config file is meant to be
+committed with your corpus; `.ragx/` (index data) is safe to gitignore — a fresh clone just
+runs `ragx-cli index`. The config file itself is never indexed as corpus content.
+
+> **Upgrading from ≤0.2.x:** the config moved from `.ragx/config.toml` to `ragx.toml` at the
+> corpus root. Commands fail with a migration hint until you
+> `mv .ragx/config.toml ragx.toml`. The index itself is untouched.
 
 `ragx-cli init` is **interactive when run on a TTY**: it probes the default LM Studio
 (`localhost:1234`) and Ollama (`localhost:11434`) ports, lists the models each server

@@ -55,6 +55,23 @@ def test_rc_applies_without_corpus_file(tmp_path, rc, caplog):
     assert not caplog.records
 
 
+def test_legacy_config_location_fails_loud(tmp_path, rc):
+    # pre-0.3.0 corpora kept config at .ragx/config.toml; loading must demand the move
+    (tmp_path / ".ragx").mkdir()
+    (tmp_path / ".ragx" / "config.toml").write_text("[graph]\nk = 12\n")
+    with pytest.raises(RagxError, match="config moved"):
+        Config.load(tmp_path)
+
+
+def test_root_found_via_config_file_alone(tmp_path):
+    # fresh clone: ragx.toml is committed, .ragx/ is gitignored and absent
+    from ragx.core.config import find_root
+    write_default_config(tmp_path)
+    sub = tmp_path / "docs"
+    sub.mkdir()
+    assert find_root(sub) == tmp_path
+
+
 def test_rc_rejects_non_provider_section(tmp_path, rc):
     write_default_config(tmp_path)
     rc.write_text("[graph]\nk = 12\n")

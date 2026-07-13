@@ -7,6 +7,8 @@ from pathlib import Path
 import pathspec
 import xxhash
 
+from ragx.core.config import CONFIG_FILE
+
 MAX_FILE_SIZE = 2 * 1024 * 1024
 BINARY_SNIFF_BYTES = 8192
 ALWAYS_SKIP_DIRS = {".ragx", ".git", "node_modules", "__pycache__", ".venv", "venv"}
@@ -34,8 +36,9 @@ def discover_files(
 ) -> list[str]:
     """Return sorted relative POSIX paths of files matching include/exclude under root.
 
-    Always skips ALWAYS_SKIP_DIRS, hidden directories, binaries (NUL byte in first 8KB),
-    and files larger than 2MB. Only a root-level .gitignore is honored (MVP limitation).
+    Always skips ALWAYS_SKIP_DIRS, hidden directories, the corpus's own root-level
+    ragx.toml, binaries (NUL byte in first 8KB), and files larger than 2MB. Only a
+    root-level .gitignore is honored (MVP limitation).
     """
     include_spec = pathspec.PathSpec.from_lines("gitwildmatch", include)
     exclude_spec = pathspec.PathSpec.from_lines("gitwildmatch", exclude) if exclude else None
@@ -50,6 +53,8 @@ def discover_files(
             path = dirpath / name
             rel = path.relative_to(root).as_posix()
 
+            if rel == CONFIG_FILE:
+                continue
             if not include_spec.match_file(rel):
                 continue
             if exclude_spec is not None and exclude_spec.match_file(rel):

@@ -8,7 +8,7 @@ import respx
 from typer.testing import CliRunner
 
 from ragx.cli.app import app
-from ragx.core.config import RAGX_DIR, Config
+from ragx.core.config import CONFIG_FILE, Config
 
 runner = CliRunner()
 
@@ -26,15 +26,15 @@ def _mock_models(url: str, models: list[str] | None) -> None:
 
 
 def _read_config(tmp_path):
-    with (tmp_path / RAGX_DIR / "config.toml").open("rb") as f:
+    with (tmp_path / CONFIG_FILE).open("rb") as f:
         return tomllib.load(f)
 
 
 def test_init_fresh(tmp_path):
     result = runner.invoke(app, ["init", str(tmp_path)])
     assert result.exit_code == 0
-    assert (tmp_path / RAGX_DIR / "config.toml").exists()
-    assert str(tmp_path / RAGX_DIR / "config.toml") in result.stdout
+    assert (tmp_path / CONFIG_FILE).exists()
+    assert str(tmp_path / CONFIG_FILE) in result.stdout
 
 
 def test_init_already_initialized(tmp_path):
@@ -124,6 +124,16 @@ def test_config_get_bogus_key(tmp_path, monkeypatch):
     assert result.exit_code == 2
 
 
+def test_legacy_config_location_exits_2_with_hint(tmp_path, monkeypatch):
+    (tmp_path / ".ragx").mkdir()
+    (tmp_path / ".ragx" / "config.toml").write_text("[graph]\nk = 12\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["config", "get", "graph.k"])
+    assert result.exit_code == 2
+    assert "config moved" in result.output
+
+
 def test_config_without_init(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["config", "get", "graph.k"])
@@ -168,6 +178,7 @@ def test_status_reports_communities(tmp_path, monkeypatch):
     from ragx.core.store import Store
 
     runner.invoke(app, ["init", str(tmp_path)])
+    db_path(tmp_path).parent.mkdir()
     with Store(db_path(tmp_path)) as store:
         store.upsert_file(FileRecord(path="a.py", content_hash="h1", mtime=1.0, chunk_count=1))
         [cid] = store.insert_chunks(

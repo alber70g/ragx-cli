@@ -50,6 +50,16 @@ def test_discover_skips_ragx_and_git_dirs(tmp_path: Path):
     assert files == ["real.txt"]
 
 
+def test_discover_skips_root_ragx_toml(tmp_path: Path):
+    _write(tmp_path, "ragx.toml", "[graph]\nk = 8\n")
+    _write(tmp_path, "sub/ragx.toml", "not the corpus config\n")
+    _write(tmp_path, "real.txt")
+
+    files = discover_files(tmp_path, include=["**/*"], exclude=[])
+
+    assert files == ["real.txt", "sub/ragx.toml"]
+
+
 def test_discover_skips_hidden_dirs(tmp_path: Path):
     _write(tmp_path, ".cache/thing.txt")
     _write(tmp_path, "visible.txt")

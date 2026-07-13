@@ -1,5 +1,6 @@
-"""Config: .ragx/config.toml per corpus, plus ~/.ragxrc for machine-level provider
-settings (embeddings/expansion/rerank). The rc overrides corpus values — with a warning."""
+"""Config: ragx.toml at the corpus root (committable; .ragx/ holds only index data),
+plus ~/.ragxrc for machine-level provider settings (embeddings/expansion/rerank).
+The rc overrides corpus values — with a warning."""
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import tomli_w
 from ragx.core.errors import NotInitializedError, RagxError
 
 RAGX_DIR = ".ragx"
+CONFIG_FILE = "ragx.toml"
 PROVIDER_SECTIONS = ("embeddings", "expansion", "rerank")
 
 log = logging.getLogger("ragx.config")
@@ -59,10 +61,10 @@ DEFAULTS: dict[str, dict[str, Any]] = {
 
 
 def find_root(start: Path | None = None) -> Path | None:
-    """Walk up from `start` (default cwd) looking for a .ragx/ directory."""
+    """Walk up from `start` (default cwd) looking for a ragx.toml file or .ragx/ directory."""
     cur = (start or Path.cwd()).resolve()
     for p in [cur, *cur.parents]:
-        if (p / RAGX_DIR).is_dir():
+        if (p / CONFIG_FILE).is_file() or (p / RAGX_DIR).is_dir():
             return p
     return None
 
@@ -70,12 +72,12 @@ def find_root(start: Path | None = None) -> Path | None:
 def require_root(start: Path | None = None) -> Path:
     root = find_root(start)
     if root is None:
-        raise NotInitializedError("no .ragx/ found — run `ragx-cli init` first")
+        raise NotInitializedError("no ragx.toml or .ragx/ found — run `ragx-cli init` first")
     return root
 
 
 def config_path(root: Path) -> Path:
-    return root / RAGX_DIR / "config.toml"
+    return root / CONFIG_FILE
 
 
 def db_path(root: Path) -> Path:
@@ -147,7 +149,7 @@ def write_rc_value(dotted: str, value: Any, rc: Path | None = None) -> Any:
 
 
 class Config:
-    """Two-level (section.key) config: DEFAULTS < corpus config.toml < ~/.ragxrc.
+    """Two-level (section.key) config: DEFAULTS < corpus ragx.toml < ~/.ragxrc.
 
     `data` is the effective merged view; `file_data` is the raw corpus file so that
     `save` never bakes rc overrides into the corpus config.
@@ -159,6 +161,12 @@ class Config:
 
     @classmethod
     def load(cls, root: Path, rc: Path | None = None) -> Config:
+        legacy = root / RAGX_DIR / "config.toml"
+        if legacy.exists():
+            raise RagxError(
+                f"config moved in 0.3.0: found legacy {legacy} — "
+                f"run `mv {legacy} {root / CONFIG_FILE}`"
+            )
         path = config_path(root)
         file_data: dict = {}
         if path.exists():
@@ -195,13 +203,12 @@ class Config:
 
     def save(self, root: Path) -> None:
         path = config_path(root)
-        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as f:
             tomli_w.dump(_deep_merge(DEFAULTS, self.file_data), f)
 
 
 def write_default_config(root: Path) -> Path:
-    """Create .ragx/ with a default config.toml. Used by `ragx-cli init`."""
+    """Write a default ragx.toml at the corpus root. Used by `ragx-cli init`."""
     cfg = Config({k: dict(v) for k, v in DEFAULTS.items()})
     cfg.save(root)
     return config_path(root)

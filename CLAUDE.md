@@ -26,7 +26,7 @@ API contracts for every core module. Deferred feature specs live in `docs/`.
   `OPENAI_API_KEY` (only when `api_key_env` is unset); explicit config always wins.
 - Machine-level provider settings live in `~/.ragxrc` (TOML; ONLY the embeddings/
   expansion/rerank sections, unknown keys fail loud). Precedence: DEFAULTS < corpus
-  config.toml < ~/.ragxrc — the rc OVERRIDES corpus values and logs a stderr warning
+  ragx.toml < ~/.ragxrc — the rc OVERRIDES corpus values and logs a stderr warning
   per overridden key. Write via `ragx-cli config set --global <key> <value>`.
   `Config.save` never bakes rc values into the corpus file.
 - Reranker is always local: sentence-transformers CrossEncoder `BAAI/bge-reranker-v2-m3`
@@ -37,7 +37,9 @@ API contracts for every core module. Deferred feature specs live in `docs/`.
 ```
 src/ragx/
   core/            # all logic lives here, CLI-independent
-    config.py      #   .ragx/config.toml + ~/.ragxrc (provider sections; rc wins, warns), DEFAULTS, find_root
+    config.py      #   ragx.toml at corpus root (committable; 0.3.0 moved it out of .ragx/) +
+                   #   ~/.ragxrc (provider sections; rc wins, warns), DEFAULTS, find_root;
+                   #   legacy .ragx/config.toml fails loud with a migration hint
     models.py      #   Chunk, ChunkDraft, FileRecord, Edge, ScoredChunk, QueryOutput
     store.py       #   SQLite: files/chunks/edges/meta; replace_edges normalizes src<dst
     vectors.py     #   hnswlib wrapper; soft-delete via JSON sidecar; get_vectors for graph

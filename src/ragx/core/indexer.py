@@ -41,6 +41,7 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool
     if edge_source not in ("chunk", "subchunk"):
         raise RagxError(f"graph.edge_source must be 'chunk' or 'subchunk', got {edge_source!r}")
     sub_size = cfg.get("graph.subchunk_size_tokens")
+    db_path(root).parent.mkdir(parents=True, exist_ok=True)
     with Store(db_path(root)) as store:
         _check_manifest(store, embedder, edge_source, sub_size, allow_rewrite=not changed_only)
         dim = embedder.dimension()
