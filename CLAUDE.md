@@ -81,7 +81,12 @@ TIES the tuned chunk-graph baseline (r@10 .923 / MRR .718 vs .717) at ~4.5x inde
 no win because the corpus's short single-topic chunks have no dilution headroom (near-dup guard
 pruned ~3 edges). hops3 + uncapped budget floods RERANK_CAP (candidates 643). Verdict: default
 stays `edge_source="chunk"`; subchunk is opt-in for corpora with long multi-concept chunks, and
-if used, drop traversal to hops=2.
+if used, drop traversal to hops=2. RE-MEASURED 2026-07-13 under BGE-M3: same tie (rerank MRR
+.7548 vs .755) at 2x index time / 2.24x edges — verdict stands across embedding models. That
+ablation also found that with tuned β=0 the pre-rerank shortlist beyond the RRF seeds is filled
+by an ascending-chunk-id tie-break (graph-only candidates all have vector=0), so graph/hops
+changes barely reach the reranker — latent design smell, see
+`research/bge-m3-subchunk-edge-ablation-2026-07-13-ties-again-and-beta-zero-shortlist-mechanism.md`.
 
 **Query** (`ragx-cli query "..."`): optional expansion (1 LLM call, strict-JSON parse, graceful
 no-op on failure) → embed all variants, HNSW top-20 each → RRF merge = seeds → heat propagation
