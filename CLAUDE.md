@@ -141,7 +141,7 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 - Temporal weighting: full decided spec in `docs/feature-temporal-weighting.md` — opt-in
   `--since/--until/--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime,
   schema v2 migration. Build only after it can be measured against the eval baseline.
-- Published to PyPI as `ragx-cli` since v0.3.0 (plain `ragx` is name-blocked); releases go out via the `v*`-tag trusted-publishing workflow.
+- Published to PyPI as `ragx-cli` (plain `ragx` is name-blocked); releases go out via the `v*`-tag trusted-publishing workflow.
 
 ## Dev loop
 
