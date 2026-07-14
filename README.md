@@ -466,17 +466,22 @@ below — Enter accepts them all. With piped stdin (agents), `--yes`, or
 ## Features & roadmap
 
 Checked features are built and validated per [the implementation plan](ragx-cli-plan.md);
-unchecked ones are next up:
+unchecked ones are next up. Release history: [CHANGELOG.md](CHANGELOG.md).
 
 - [x] **CLI & storage**: typer CLI, SQLite schema, provider abstraction (Embedder/Generator/Reranker)
 - [x] **Baseline vector RAG**: discovery, chunking, embeddings, HNSW search, incremental `--changed`
 - [x] **Similarity graph**: kNN edge construction, heat-propagation traversal, `inspect`, `--explain`
 - [x] **Quality & measurement**: multi-query/HyDE expansion, RRF fusion, cross-encoder rerank, `eval` harness
 - [x] **Communities**: Leiden detection over the edge list (index-time, read-only via status/inspect)
-- [ ] **query --global** for corpus-level questions
+- [x] **Interactive `init`**: LM Studio/Ollama server + model detection, guided embeddings/expansion/corpus setup (`--yes` for defaults)
+- [x] **Committable config**: `ragx.toml` at the corpus root (0.3.0; was `.ragx/config.toml`), index data stays gitignored in `.ragx/`
+- [x] **Offline-friendly rerank**: graceful degradation + pre-seeding docs when huggingface.co is unreachable
+- [x] **Sub-chunk edges** (opt-in `graph.edge_source="subchunk"`): edge weight = max cosine over sentence-aligned sub-chunk pairs, for corpora with long multi-concept chunks
+- [ ] **Community labels**: name the Leiden communities so they're browsable without reading member chunks
+- [ ] **query --global** for corpus-level questions (answer from community summaries, not individual chunks)
 - [ ] **MCP server**: a second thin shell over `ragx.core` (the core/CLI split it needs is already enforced)
 - [ ] **[Temporal weighting](docs/feature-temporal-weighting.md)**: opt-in `--since`/`--until`/`--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime
 - [ ] **Release**: publish to PyPI as `ragx-cli` (plain `ragx` is name-blocked, too similar to an existing project) so `uvx ragx-cli` works out of the box
 
-Development: `uv sync --group dev && uv run pytest`. 126 tests; module contracts live in
+Development: `uv sync --group dev && uv run pytest`. 173 tests; module contracts live in
 `CONTRACTS.md` / `CONTRACTS-PHASE23.md`.

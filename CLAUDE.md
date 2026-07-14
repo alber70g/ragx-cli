@@ -60,7 +60,7 @@ src/ragx/
                    # st_reranker.py; registry.py factories (env-var + api_key_env resolution)
   cli/             # thin shells only: app.py (init/status/config + registration),
                    # pipeline.py (index/query), inspect_cmd.py, eval_cmd.py, output.py
-tests/             # 151 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
+tests/             # 173 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
 ```
 
 ## Flows
@@ -145,7 +145,7 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 
 ## Dev loop
 
-`uv sync --group dev --extra rerank` · `uv run pytest -q` (151 pass, ~5 s) ·
+`uv sync --group dev --extra rerank` · `uv run pytest -q` (173 pass, ~5 s) ·
 `uv run ruff check src tests` · file soft cap ~150 lines · expected failures raise `RagxError`
 (CLI maps to exit 2). Live smoke: LM Studio must be running with the configured embedding model.
 Changes that impact usage (CLI flags, config keys/precedence, output schemas, install steps)
