@@ -481,7 +481,7 @@ unchecked ones are next up. Release history: [CHANGELOG.md](CHANGELOG.md).
 - [ ] **query --global** for corpus-level questions (answer from community summaries, not individual chunks)
 - [ ] **MCP server**: a second thin shell over `ragx.core` (the core/CLI split it needs is already enforced)
 - [ ] **[Temporal weighting](docs/feature-temporal-weighting.md)**: opt-in `--since`/`--until`/`--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime
-- [ ] **Release**: publish to PyPI as `ragx-cli` (plain `ragx` is name-blocked, too similar to an existing project) so `uvx ragx-cli` works out of the box
+- [x] **Release**: publish to PyPI as `ragx-cli` (plain `ragx` is name-blocked, too similar to an existing project) so `uvx ragx-cli` works out of the box
 
 Development: `uv sync --group dev && uv run pytest`. 173 tests; module contracts live in
 `CONTRACTS.md` / `CONTRACTS-PHASE23.md`.
