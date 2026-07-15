@@ -4,7 +4,10 @@ All notable changes to `ragx-cli` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.3.1] — 2026-07-15
+## [0.3.2] — 2026-07-15
+
+_0.3.1 was tagged but never published — its release workflow referenced a nonexistent
+action tag; 0.3.2 is the same change plus the CI fix._
 
 ### Changed
 
@@ -92,7 +95,7 @@ Initial release: Phases 0–3 of [the plan](ragx-cli-plan.md), built and validat
   on stderr, exit codes `0` results / `1` empty / `2` error.
 - MIT license; PyPI packaging as `ragx-cli` with trusted-publishing release workflow.
 
-[0.3.1]: https://github.com/alber70g/ragx-cli/compare/v0.3.0...v0.3.1
+[0.3.2]: https://github.com/alber70g/ragx-cli/compare/v0.3.0...v0.3.2
 [0.3.0]: https://github.com/alber70g/ragx-cli/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alber70g/ragx-cli/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/alber70g/ragx-cli/compare/v0.1.0...v0.1.1
