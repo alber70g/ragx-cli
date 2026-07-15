@@ -35,41 +35,39 @@ class IndexStats:
     communities_total: int = 0
 
 
-def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool = False) -> IndexStats:
-    """Index the corpus at `root`. Full rebuild by default; hash-diff when changed_only."""
+def run_index(root: Path, cfg: Config, embedder: Embedder, *, full: bool = False) -> IndexStats:
+    """Index the corpus at `root`. Hash-diff incremental by default; rebuild when full."""
     edge_source = cfg.get("graph.edge_source")
     if edge_source not in ("chunk", "subchunk"):
         raise RagxError(f"graph.edge_source must be 'chunk' or 'subchunk', got {edge_source!r}")
     sub_size = cfg.get("graph.subchunk_size_tokens")
+    size_tokens = cfg.get("chunking.size_tokens")
+    overlap = cfg.get("chunking.overlap")
     db_path(root).parent.mkdir(parents=True, exist_ok=True)
     with Store(db_path(root)) as store:
-        _check_manifest(store, embedder, edge_source, sub_size, allow_rewrite=not changed_only)
+        _check_manifest(
+            store, embedder, edge_source, sub_size, size_tokens, overlap, allow_rewrite=full
+        )
         dim = embedder.dimension()
         store.set_meta("embedding_model", embedder.model)
         store.set_meta("embedding_dim", str(dim))
         store.set_meta("edge_source", edge_source)
         store.set_meta("subchunk_size_tokens", str(sub_size))
+        store.set_meta("chunk_size_tokens", str(size_tokens))
+        store.set_meta("chunk_overlap", str(overlap))
 
-        current = {
-            rel: hash_file(root / rel)
-            for rel in discover_files(
-                root,
-                cfg.get("corpus.include"),
-                cfg.get("corpus.exclude"),
-                cfg.get("corpus.respect_gitignore"),
-            )
-        }
+        current = _discover_hashes(root, cfg)
         known = store.get_file_hashes()
 
-        if changed_only:
-            to_index = [p for p, h in current.items() if known.get(p) != h]
-            to_delete = [p for p in known if p not in current]
-            index = _open_vectors(root, dim)
-        else:
+        if full:
             to_index, to_delete = list(current), []
             for p in known:
                 store.delete_file(p)
             vectors_path(root).unlink(missing_ok=True)
+            index = _open_vectors(root, dim)
+        else:
+            to_index = [p for p, h in current.items() if known.get(p) != h]
+            to_delete = [p for p in known if p not in current]
             index = _open_vectors(root, dim)
 
         stats = IndexStats(files_unchanged=len(current) - len(to_index))
@@ -80,8 +78,6 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool
             stats.files_deleted += 1
             stats.chunks_deleted += len(removed)
 
-        size_tokens = cfg.get("chunking.size_tokens")
-        overlap = cfg.get("chunking.overlap")
         new_ids: list[int] = []
         for path in sorted(to_index):
             if path in known:  # changed file: drop old chunks first
@@ -134,9 +130,21 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, changed_only: bool
 
 
 def _check_manifest(
-    store: Store, embedder: Embedder, edge_source: str, sub_size: int, *, allow_rewrite: bool
+    store: Store,
+    embedder: Embedder,
+    edge_source: str,
+    sub_size: int,
+    size_tokens: int,
+    overlap: float,
+    *,
+    allow_rewrite: bool,
 ) -> None:
-    checks = [("embedding_model", embedder.model), ("edge_source", edge_source)]
+    checks = [
+        ("embedding_model", embedder.model),
+        ("edge_source", edge_source),
+        ("chunk_size_tokens", str(size_tokens)),
+        ("chunk_overlap", str(overlap)),
+    ]
     if edge_source == "subchunk":  # size only shapes the graph when subchunk edges are on
         checks.append(("subchunk_size_tokens", str(sub_size)))
     for key, current in checks:
@@ -144,8 +152,34 @@ def _check_manifest(
         if prev and prev != str(current) and not allow_rewrite:
             raise ManifestMismatchError(
                 f"index was built with {key}={prev!r} but config says {current!r}; "
-                "run a full `ragx-cli index` to rebuild"
+                "run `ragx-cli index --full` to rebuild"
             )
+
+
+def _discover_hashes(root: Path, cfg: Config) -> dict[str, str]:
+    return {
+        rel: hash_file(root / rel)
+        for rel in discover_files(
+            root,
+            cfg.get("corpus.include"),
+            cfg.get("corpus.exclude"),
+            cfg.get("corpus.respect_gitignore"),
+        )
+    }
+
+
+def corpus_drift(root: Path, cfg: Config) -> dict[str, int]:
+    """Diff the corpus on disk against the stored file hashes. Read-only."""
+    current = _discover_hashes(root, cfg)
+    known: dict[str, str] = {}
+    if db_path(root).exists():
+        with Store(db_path(root)) as store:
+            known = store.get_file_hashes()
+    return {
+        "new": sum(1 for p in current if p not in known),
+        "changed": sum(1 for p, h in current.items() if p in known and known[p] != h),
+        "deleted": sum(1 for p in known if p not in current),
+    }
 
 
 def _unit(vec: Sequence[float]) -> list[float]:
@@ -193,7 +227,7 @@ def _subchunk_edge_fn(
     if len(chunk_ids) != store.chunk_count():
         raise RagxError(
             "sub-chunk vectors missing for some chunks (index predates graph.edge_source="
-            "'subchunk'); run a full `ragx-cli index` to rebuild"
+            "'subchunk'); run `ragx-cli index --full` to rebuild"
         )
     chunk_vectors = dict(zip(chunk_ids, index.get_vectors(chunk_ids)))
 

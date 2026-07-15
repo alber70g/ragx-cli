@@ -42,7 +42,7 @@ def _check_model(store: Store, embedder: Embedder) -> None:
     if built_with != embedder.model:
         raise RagxError(
             f"index built with {built_with!r}, config says {embedder.model!r}; "
-            "run `ragx-cli index` to rebuild"
+            "run `ragx-cli index --full` to rebuild"
         )
 
 

@@ -21,9 +21,9 @@ that can justify every result via the exact graph path that produced it.
 ```bash
 uv tool install ragx-cli --with ragx-cli[rerank]  # install and use `ragx-cli`
 ragx-cli init                  # create ragx.toml next to your corpus (interactive on a TTY; --yes for defaults)
-ragx-cli index                 # chunk -> embed -> HNSW + kNN similarity graph
+ragx-cli index                 # chunk -> embed -> HNSW + kNN similarity graph (incremental after the first run)
 ragx-cli query "why did we switch build tools?" --json --files-only
-ragx-cli index --changed       # incremental: only new/modified/deleted files
+ragx-cli index --full          # full rebuild: re-chunk + re-embed everything
 ```
 
 Runs against any OpenAI-compatible embedding endpoint (LM Studio, Ollama, OpenAI). Reranking
@@ -65,7 +65,7 @@ mixing several concepts gets one sharp edge per concept instead of a diluted ave
 between near-duplicate chunks (whole-chunk cosine ≥ `near_dup_sim`) are dropped — those are the
 measured precision-killers. Costs roughly 5–10× more embedding calls at index time; retrieval
 units, traversal, and query flow are unchanged. Switching `edge_source` (or the sub-chunk size)
-requires a full re-index; `--changed` fails loud on the mismatch. Literature grounding:
+requires `index --full`; incremental runs fail loud on the mismatch. Literature grounding:
 `research/fine-grained-sub-chunk-edges-with-coarse-chunk-nodes-multi-granularity-graph-rag-literature-validation.md`.
 In this mode `k` counts links per *sub-chunk* with no per-chunk cap, so the graph is denser and
 shallower traversal suffices. Measured on the tuned eval corpus (2026-07): at `hops=2` it ties
@@ -88,8 +88,13 @@ flowchart TD
     G --> F
 ```
 
-Incremental runs (`--changed`) re-embed only changed files and repair only the edge lists that
-those chunks touch. Content hashes make `touch`-ed but unchanged files free.
+`ragx-cli index` is **incremental by default** (0.4.0; `--changed` is a deprecated alias): it
+re-embeds only new/modified files, drops deleted ones, and repairs only the edge lists those
+chunks touch. Content hashes make `touch`-ed but unchanged files free, and include/exclude glob
+changes converge to the same file set a rebuild would produce. `--full` rebuilds from scratch;
+changing `embeddings.model`, `chunking.*`, or `graph.edge_source` requires it — incremental runs
+fail loud on the manifest mismatch. `ragx-cli status` reports **drift** (files new/changed/deleted
+since the last index) so you can see when a re-index is due without running one.
 
 ### Querying
 
@@ -294,6 +299,8 @@ Full write-ups: `research/bge-m3-dense-q8-vs-nomic-q4-benchmark-2026-07-12-workt
 - Every chunk carries `file`, `line_start/line_end`, `byte_start/byte_end` — agents jump to the
   exact source location and read the full text themselves (JSON chunk text is truncated).
 - `--files-only` aggregates chunk scores per file (sum of top-3) — the mode coding agents use most.
+- `ragx-cli status` includes a `drift` object (`new`/`changed`/`deleted` file counts vs the index) —
+  agents check it to decide whether to run `ragx-cli index` before querying.
 - `ragx-cli query -` reads the query from stdin; `ragx-cli inspect chunk|file|neighbors|communities|community`
   debugs the graph.
 
@@ -313,7 +320,8 @@ questions; fall back to grep for exact identifiers.
   `file` + `line_start/line_end`; the JSON `text` is truncated, so read the file yourself
   for full context.
 - Fast mode (no LLM call, no cross-encoder): add `--no-expand --no-rerank`.
-- After adding or editing files: `ragx-cli index --changed` (cheap, hash-based).
+- After adding or editing files: `ragx-cli index` (incremental and cheap — hash-based).
+  `ragx-cli status --json` shows `drift` counts if you want to check staleness first.
 - stdout is exactly one JSON document; logs are on stderr.
   Exit codes: 0 = results, 1 = no results (not an error), 2 = error.
 - Why did this result appear? `ragx-cli query "..." --explain`.
@@ -471,7 +479,7 @@ Checked features are built and validated per [the implementation plan](ragx-cli-
 unchecked ones are next up. Release history: [CHANGELOG.md](CHANGELOG.md).
 
 - [x] **CLI & storage**: typer CLI, SQLite schema, provider abstraction (Embedder/Generator/Reranker)
-- [x] **Baseline vector RAG**: discovery, chunking, embeddings, HNSW search, incremental `--changed`
+- [x] **Baseline vector RAG**: discovery, chunking, embeddings, HNSW search, incremental indexing
 - [x] **Similarity graph**: kNN edge construction, heat-propagation traversal, `inspect`, `--explain`
 - [x] **Quality & measurement**: multi-query/HyDE expansion, RRF fusion, cross-encoder rerank, `eval` harness
 - [x] **Communities**: Leiden detection over the edge list (index-time, read-only via status/inspect)
@@ -479,11 +487,12 @@ unchecked ones are next up. Release history: [CHANGELOG.md](CHANGELOG.md).
 - [x] **Committable config**: `ragx.toml` at the corpus root (0.3.0; was `.ragx/config.toml`), index data stays gitignored in `.ragx/`
 - [x] **Offline-friendly rerank**: graceful degradation + pre-seeding docs when huggingface.co is unreachable
 - [x] **Sub-chunk edges** (opt-in `graph.edge_source="subchunk"`): edge weight = max cosine over sentence-aligned sub-chunk pairs, for corpora with long multi-concept chunks
+- [x] **Incremental by default** (0.4.0): `index` hash-diffs, `--full` rebuilds, `status` reports corpus drift, chunking params are manifest-guarded
 - [ ] **Community labels**: name the Leiden communities so they're browsable without reading member chunks
 - [ ] **query --global** for corpus-level questions (answer from community summaries, not individual chunks)
 - [ ] **MCP server**: a second thin shell over `ragx.core` (the core/CLI split it needs is already enforced)
 - [ ] **[Temporal weighting](docs/feature-temporal-weighting.md)**: opt-in `--since`/`--until`/`--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime
 - [x] **Release**: publish to PyPI as `ragx-cli` (plain `ragx` is name-blocked, too similar to an existing project) so `uvx ragx-cli` works out of the box
 
-Development: `uv sync --group dev && uv run pytest`. 177 tests; module contracts live in
+Development: `uv sync --group dev && uv run pytest`. 183 tests; module contracts live in
 `CONTRACTS.md` / `CONTRACTS-PHASE23.md`.

@@ -22,14 +22,21 @@ def register(app: typer.Typer) -> None:
 
 def index(
     path: Path | None = typer.Argument(None),
-    changed: bool = typer.Option(False, "--changed", help="only re-process new/modified/deleted files"),
+    full: bool = typer.Option(False, "--full", help="full rebuild: re-chunk and re-embed everything"),
+    changed: bool = typer.Option(
+        False, "--changed", hidden=True, help="deprecated: incremental is now the default"
+    ),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Chunk, embed, and index the corpus (full rebuild unless --changed)."""
+    """Chunk, embed, and index the corpus (incremental by default; --full rebuilds)."""
+    if changed and full:
+        fail("--changed and --full are mutually exclusive")
+    if changed:
+        print("warning: --changed is deprecated; incremental is now the default", file=sys.stderr)
     try:
         root = require_root(path)
         cfg = Config.load(root, confirm=migrate_confirm())
-        stats = run_index(root, cfg, make_embedder(cfg), changed_only=changed)
+        stats = run_index(root, cfg, make_embedder(cfg), full=full)
     except RagxError as exc:
         fail(str(exc))
     doc = {"schema": "ragx.index.v1", **stats.__dict__}

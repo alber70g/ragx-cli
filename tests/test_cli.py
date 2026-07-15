@@ -174,6 +174,7 @@ def test_status_json_shape_and_stdout_purity(tmp_path, monkeypatch):
     assert doc["files"] == 0
     assert doc["chunks"] == 0
     assert doc["edges"] == 0
+    assert doc["drift"] == {"new": 0, "changed": 0, "deleted": 0}
 
 
 def test_status_human_readable(tmp_path, monkeypatch):
@@ -184,6 +185,27 @@ def test_status_human_readable(tmp_path, monkeypatch):
     assert result.exit_code == 1
     assert "root:" in result.stdout
     assert "embedding:" in result.stdout
+
+
+def test_status_reports_drift(tmp_path, monkeypatch):
+    runner.invoke(app, ["init", str(tmp_path)])
+    (tmp_path / "a.md").write_text("# A\n\nSome text.\n")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["status", "--json"])
+    doc = json.loads(result.stdout)
+    assert doc["drift"] == {"new": 1, "changed": 0, "deleted": 0}
+
+    result = runner.invoke(app, ["status"])
+    assert "drift: 1 new, 0 changed, 0 deleted" in result.stdout
+    assert "ragx-cli index" in result.stdout
+
+
+def test_index_changed_and_full_mutually_exclusive(tmp_path, monkeypatch):
+    runner.invoke(app, ["init", str(tmp_path)])
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["index", "--changed", "--full"])
+    assert result.exit_code == 2
 
 
 def test_status_without_init(tmp_path, monkeypatch):

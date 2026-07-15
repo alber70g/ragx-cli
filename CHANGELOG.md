@@ -4,6 +4,25 @@ All notable changes to `ragx-cli` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed (BREAKING)
+
+- **`ragx-cli index` is now incremental by default** (previously a full rebuild).
+  It hash-diffs the corpus and re-processes only new/modified/deleted files. The old
+  behavior moved to `ragx-cli index --full`; `--changed` remains as a deprecated,
+  hidden alias for the (now default) incremental mode.
+- **Chunking params joined the index manifest**: changing `chunking.size_tokens` or
+  `chunking.overlap` now fails loud on an incremental run (previously it silently left
+  old files chunked under the old params). Fix is `ragx-cli index --full`.
+
+### Added
+
+- **`ragx-cli status` reports corpus drift**: a `drift` object
+  (`{"new": N, "changed": N, "deleted": N}`, same in text output) diffing the corpus
+  on disk against the stored file hashes, so agents and humans can see when a
+  re-index is due without running one.
+
 ## [0.3.3] — 2026-07-15
 
 ### Added

@@ -93,10 +93,13 @@ def _counts(root: Path) -> tuple[int, int, int, int]:
 
 @app.command()
 def status(json_out: bool = typer.Option(False, "--json")) -> None:
-    """Show corpus root, embedding config, and index counts."""
+    """Show corpus root, embedding config, index counts, and drift vs the corpus on disk."""
+    from ragx.core.indexer import corpus_drift
+
     root = _require_root()
     cfg = _load_config(root)
     files, chunks, edges, communities = _counts(root)
+    drift = corpus_drift(root, cfg)
     doc = {
         "schema": "ragx.status.v1",
         "root": str(root),
@@ -106,6 +109,7 @@ def status(json_out: bool = typer.Option(False, "--json")) -> None:
         "chunks": chunks,
         "edges": edges,
         "communities": communities,
+        "drift": drift,
     }
     if json_out:
         emit_json(doc)
@@ -113,6 +117,10 @@ def status(json_out: bool = typer.Option(False, "--json")) -> None:
         typer.echo(f"root: {doc['root']}")
         typer.echo(f"embedding: {doc['embedding_provider']}/{doc['embedding_model']}")
         typer.echo(f"files: {files}  chunks: {chunks}  edges: {edges}  communities: {communities}")
+        line = f"drift: {drift['new']} new, {drift['changed']} changed, {drift['deleted']} deleted"
+        if any(drift.values()):
+            line += "  (run `ragx-cli index`)"
+        typer.echo(line)
     if files == 0 and chunks == 0 and edges == 0:
         raise typer.Exit(code=1)
 

@@ -10,7 +10,7 @@ import pytest
 from ragx.core.config import Config, db_path, write_default_config
 from ragx.core.errors import ManifestMismatchError
 from ragx.core.store import Store
-from ragx.core.indexer import run_index
+from ragx.core.indexer import corpus_drift, run_index
 from ragx.core.query import QueryOptions, run_query, to_files_json, to_query_json
 
 
@@ -74,15 +74,15 @@ def test_incremental_reindex(tmp_path):
     emb = FakeEmbedder()
     run_index(tmp_path, cfg, emb)
 
-    # unchanged corpus: nothing re-processed
-    stats = run_index(tmp_path, cfg, emb, changed_only=True)
+    # unchanged corpus: nothing re-processed (incremental is the default)
+    stats = run_index(tmp_path, cfg, emb)
     assert stats.files_indexed == 0
     assert stats.files_unchanged == 3
 
     # edit one file, delete another
     (tmp_path / "pets.md").write_text("# Pets\n\nDogs bark. Hamsters run on wheels.\n")
     (tmp_path / "space.md").unlink()
-    stats = run_index(tmp_path, cfg, emb, changed_only=True)
+    stats = run_index(tmp_path, cfg, emb)
     assert stats.files_indexed == 1
     assert stats.files_deleted == 1
 
@@ -154,7 +154,7 @@ def test_subchunk_incremental_reindex(tmp_path):
 
     (tmp_path / "pets.md").write_text("# Pets\n\nDogs bark. Hamsters run on wheels.\n")
     (tmp_path / "space.md").unlink()
-    stats = run_index(tmp_path, cfg, emb, changed_only=True)
+    stats = run_index(tmp_path, cfg, emb)
     assert stats.files_indexed == 1
     assert stats.files_deleted == 1
 
@@ -166,7 +166,7 @@ def test_subchunk_incremental_reindex(tmp_path):
     assert out.results[0].chunk.file_path == "pets.md"
 
 
-def test_changed_only_fails_loud_on_edge_source_flip(tmp_path):
+def test_incremental_fails_loud_on_edge_source_flip(tmp_path):
     make_corpus(tmp_path)
     write_default_config(tmp_path)
     cfg = Config.load(tmp_path)
@@ -175,7 +175,53 @@ def test_changed_only_fails_loud_on_edge_source_flip(tmp_path):
 
     cfg.set("graph.edge_source", "subchunk")
     with pytest.raises(ManifestMismatchError):
-        run_index(tmp_path, cfg, emb, changed_only=True)
+        run_index(tmp_path, cfg, emb)
+    stats = run_index(tmp_path, cfg, emb, full=True)  # explicit rebuild clears the mismatch
+    assert stats.files_indexed == 3
+
+
+def test_incremental_fails_loud_on_chunking_change(tmp_path):
+    make_corpus(tmp_path)
+    write_default_config(tmp_path)
+    cfg = Config.load(tmp_path)
+    emb = FakeEmbedder()
+    run_index(tmp_path, cfg, emb)
+
+    cfg.set("chunking.size_tokens", "400")
+    with pytest.raises(ManifestMismatchError):
+        run_index(tmp_path, cfg, emb)
+    stats = run_index(tmp_path, cfg, emb, full=True)
+    assert stats.files_indexed == 3
+
+
+def test_corpus_drift(tmp_path):
+    make_corpus(tmp_path)
+    write_default_config(tmp_path)
+    cfg = Config.load(tmp_path)
+    emb = FakeEmbedder()
+
+    assert corpus_drift(tmp_path, cfg) == {"new": 3, "changed": 0, "deleted": 0}
+    run_index(tmp_path, cfg, emb)
+    assert corpus_drift(tmp_path, cfg) == {"new": 0, "changed": 0, "deleted": 0}
+
+    (tmp_path / "pets.md").write_text("# Pets\n\nParrots repeat words.\n")
+    (tmp_path / "space.md").unlink()
+    (tmp_path / "gardens.md").write_text("# Gardens\n\nTomatoes ripen in summer sun.\n")
+    assert corpus_drift(tmp_path, cfg) == {"new": 1, "changed": 1, "deleted": 1}
+
+
+def test_drift_reflects_exclude_change(tmp_path):
+    make_corpus(tmp_path)
+    write_default_config(tmp_path)
+    cfg = Config.load(tmp_path)
+    emb = FakeEmbedder()
+    run_index(tmp_path, cfg, emb)
+
+    cfg.set("corpus.exclude", "cooking.md")
+    assert corpus_drift(tmp_path, cfg) == {"new": 0, "changed": 0, "deleted": 1}
+    stats = run_index(tmp_path, cfg, emb)  # incremental converges on the new glob set
+    assert stats.files_deleted == 1
+    assert corpus_drift(tmp_path, cfg) == {"new": 0, "changed": 0, "deleted": 0}
 
 
 def test_index_persists_communities(tmp_path):
@@ -210,7 +256,7 @@ def test_changed_reindex_recomputes_communities(tmp_path):
     with Store(db_path(tmp_path)) as store:
         deleted_ids = set(store.chunk_ids_for_file("space.md"))
     (tmp_path / "space.md").unlink()
-    run_index(tmp_path, cfg, emb, changed_only=True)
+    run_index(tmp_path, cfg, emb)
 
     with Store(db_path(tmp_path)) as store:
         members = set()
