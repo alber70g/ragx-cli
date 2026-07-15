@@ -24,6 +24,7 @@ ragx-cli init                  # create ragx.toml next to your corpus (interacti
 ragx-cli index                 # chunk -> embed -> HNSW + kNN similarity graph (incremental after the first run)
 ragx-cli query "why did we switch build tools?" --json --files-only
 ragx-cli index --full          # full rebuild: re-chunk + re-embed everything
+ragx-cli models                # recommend + download an embedding/reranker combo via LM Studio
 ```
 
 Runs against any OpenAI-compatible embedding endpoint (LM Studio, Ollama, OpenAI). Reranking
@@ -291,6 +292,53 @@ Full write-ups: `research/bge-m3-dense-q8-vs-nomic-q4-benchmark-2026-07-12-workt
 
 ---
 
+## Picking models: `ragx-cli models`
+
+`ragx-cli models` recommends an embedding + reranker combo, downloads the embedding model
+**through LM Studio** (`lms get` — one download path, plays well with restricted networks),
+pre-fetches the reranker from Hugging Face, and writes both to `ragx.toml`. Interactive on a
+TTY (quality tier + engine questions, RAM auto-detected); scriptable via flags:
+
+```bash
+ragx-cli models                                        # interactive
+ragx-cli models --quality balanced --yes --json        # agents
+ragx-cli models --quality fast --dry-run               # recommend only, change nothing
+```
+
+The curated catalog (every entry verified working end-to-end):
+
+| tier | embedding model | notes |
+|---|---|---|
+| `fast` | EmbeddingGemma 300M | 308M, 100+ languages, 2048-token context |
+| `balanced` | BGE-M3 | ragx's benchmarked production model (~100 languages) |
+| `best` | Qwen3-Embedding-0.6B | 100+ languages, 32K context |
+| `jina-nano` | Jina embeddings v5 nano | 239M, best-in-class sub-500M; **CC-BY-NC (non-commercial)**; llama-server engine only — LM Studio downloads it but can't serve EuroBERT |
+
+**Serving engines.** Embeddings run through `--embed-engine`: **`llama-server`** (default when
+llama.cpp is installed — ragx auto-spawns `llama-server --embedding` on the downloaded GGUF and
+terminates it at exit; LM Studio is only the downloader) or **`lm-studio`** (LM Studio serves
+`/v1/embeddings`; zero extra processes, LM Studio must be running). The reranker —
+`BAAI/bge-reranker-v2-m3` (multilingual) — runs through `--rerank-engine`:
+
+- **`llama-server`** (default when llama.cpp is installed): the reranker's Q8_0 GGUF is also
+  downloaded via LM Studio, and ragx auto-spawns/terminates a `llama-server --rerank` process
+  at query time (`rerank.provider="llama-server"`, `rerank.gguf`, `rerank.base_url`,
+  `rerank.server_bin`). **No huggingface.co access needed anywhere.** GGUF scores are validated
+  within ~0.5 logit of the safetensors originals.
+- **`sentence-transformers`**: the classic CrossEncoder path; model pre-fetched from Hugging
+  Face (needs the `ragx-cli[rerank]` extra).
+
+With both engines on `llama-server` the whole stack is ragx-managed: LM Studio downloads the
+GGUFs, ragx spawns and reaps the servers, and neither LM Studio nor huggingface.co is needed
+at query time. Under 8 GB RAM the embedding tier drops to `fast`; on macOS
+`lms get --yes` picks MLX variants where LM Studio's catalog offers them. Switching the
+embedding model invalidates the index — the command tells you to run `ragx-cli index --full`.
+`init` offers this flow as its final step; rerun `ragx-cli models` anytime to switch.
+
+Why not `jina-embeddings-v5-text-nano`? Excellent model, but its EuroBERT architecture needs
+Jina's llama.cpp fork — stock LM Studio can't load it (and the license is CC-BY-NC). See
+`research/lm-studio-model-download-api-and-curated-embedding-reranker-catalog-for-ragx-models-command.md`.
+
 ## Agent-first conventions
 
 - `--json` emits exactly one JSON document on stdout (versioned schemas: `ragx.query.v1`,
@@ -381,9 +429,19 @@ detects the mismatch and asks you to run a full `ragx-cli index`.
 
 ### Reranker on restricted networks (no huggingface.co)
 
-The reranker model (`BAAI/bge-reranker-v2-m3`, ~2.3 GB) is downloaded from huggingface.co on
-first use. If your network blocks huggingface.co, ragx-cli degrades gracefully — queries run
-without reranking and a warning explains why — but you have three ways to get reranking working:
+With the default `sentence-transformers` engine, the reranker model
+(`BAAI/bge-reranker-v2-m3`, ~2.3 GB) is downloaded from huggingface.co on first use. If your
+network blocks huggingface.co, ragx-cli degrades gracefully — queries run without reranking
+and a warning explains why — and the easiest fix is to skip huggingface.co entirely:
+
+**Option 0 — the `llama-server` engine (recommended).** `ragx-cli models --rerank-engine
+llama-server` downloads a validated Q8_0 GGUF of the reranker **through LM Studio** (same
+download path as the embedding model) and reranks via llama.cpp's `llama-server --rerank`,
+which ragx starts and stops automatically. Requires a recent llama.cpp
+(`brew install llama.cpp`); no torch, no sentence-transformers, no huggingface.co. The GGUFs
+score within ~0.5 logit of the safetensors originals with identical ordering.
+
+Prefer the sentence-transformers engine? Three more ways:
 
 **Option A — copy the model and point `rerank.model` at the directory** (recommended).
 On any machine with access:
@@ -488,6 +546,7 @@ unchecked ones are next up. Release history: [CHANGELOG.md](CHANGELOG.md).
 - [x] **Offline-friendly rerank**: graceful degradation + pre-seeding docs when huggingface.co is unreachable
 - [x] **Sub-chunk edges** (opt-in `graph.edge_source="subchunk"`): edge weight = max cosine over sentence-aligned sub-chunk pairs, for corpora with long multi-concept chunks
 - [x] **Incremental by default** (0.4.0): `index` hash-diffs, `--full` rebuilds, `status` reports corpus drift, chunking params are manifest-guarded
+- [x] **`ragx-cli models`**: curated embedding/reranker recommendation (quality tier + RAM detection), downloads via LM Studio's `lms get`, serving via llama-server or LM Studio
 - [ ] **Community labels**: name the Leiden communities so they're browsable without reading member chunks
 - [ ] **query --global** for corpus-level questions (answer from community summaries, not individual chunks)
 - [ ] **MCP server**: a second thin shell over `ragx.core` (the core/CLI split it needs is already enforced)

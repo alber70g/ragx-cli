@@ -63,6 +63,7 @@ def test_init_interactive_detects_server_and_applies_answers(tmp_path):
             "**/*.md,docs/**",  # corpus include globs
             "drafts/**",  # corpus exclude globs
             "n",  # respect .gitignore
+            "",  # recommend + download models now -> default no
         ]
     )
     result = runner.invoke(app, ["init", str(tmp_path), "--interactive"], input=answers + "\n")
@@ -84,8 +85,9 @@ def test_init_interactive_detects_server_and_applies_answers(tmp_path):
 def test_init_interactive_no_servers_expansion_off(tmp_path):
     _mock_models(LMSTUDIO_MODELS_URL, None)
     _mock_models(OLLAMA_MODELS_URL, None)
-    # provider, base URL, model, api key env (defaults), expansion off, corpus defaults
-    answers = "\n\n\n\nn\n\n\n\n"
+    # provider, base URL, model, api key env (defaults), expansion off, corpus defaults,
+    # models download declined
+    answers = "\n\n\n\nn\n\n\n\n\n"
     result = runner.invoke(app, ["init", str(tmp_path), "--interactive"], input=answers)
     assert result.exit_code == 0, result.output
     data = _read_config(tmp_path)

@@ -39,13 +39,15 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "fusion": {"rrf_k": 60, "per_query_top": 20},
     "scoring": {"alpha_rerank": 0.6, "beta_heat": 0.25, "gamma_vector": 0.15},
     "embeddings": {
-        "provider": "openai",
+        "provider": "openai",  # "openai" (any OpenAI-compatible server) | "ollama" | "llama-server"
         "base_url": "http://localhost:1234/v1",
         "model": "text-embedding-nomic-embed-text-v1.5@q4_k_m",
         "doc_prefix": "search_document: ",
         "query_prefix": "search_query: ",
         "batch_size": 32,
         "api_key_env": "",  # NAME of an env var holding the API key; empty = no auth header
+        "gguf": "",  # llama-server only: path to the embedding GGUF (LM Studio dir works)
+        "server_bin": "llama-server",  # llama-server only: binary name or path
     },
     "expansion": {
         "enabled": True,
@@ -56,7 +58,14 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "hyde": True,
         "api_key_env": "",
     },
-    "rerank": {"enabled": True, "provider": "sentence-transformers", "model": "BAAI/bge-reranker-v2-m3"},
+    "rerank": {
+        "enabled": True,
+        "provider": "sentence-transformers",  # or "llama-server" (llama.cpp /v1/rerank)
+        "model": "BAAI/bge-reranker-v2-m3",
+        "base_url": "http://127.0.0.1:9814",  # llama-server only; auto-spawn needs the port
+        "gguf": "",  # llama-server only: path to the reranker GGUF (LM Studio dir works)
+        "server_bin": "llama-server",  # llama-server only: binary name or path
+    },
     "query": {"top": 8, "max_chunk_chars": 1200},
 }
 

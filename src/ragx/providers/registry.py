@@ -41,9 +41,26 @@ def _resolve_base_url(cfg: Config, section: str) -> str:
     return base_url
 
 
+_LLAMA_EMBED_BASE_URL = "http://127.0.0.1:9813/v1"  # rerank's llama-server sits on 9814
+
+
 def make_embedder(cfg: Config) -> Embedder:
     provider = cfg.get("embeddings.provider")
     base_url = cfg.get("embeddings.base_url")
+    if provider == "llama-server":
+        from ragx.providers.llama_embedder import LlamaServerEmbedder
+
+        if base_url == _DEFAULT_OPENAI_BASE_URL:  # same convention as the ollama swap below
+            base_url = _LLAMA_EMBED_BASE_URL
+        return LlamaServerEmbedder(
+            base_url=base_url,
+            gguf=cfg.get("embeddings.gguf"),
+            model=cfg.get("embeddings.model"),
+            doc_prefix=cfg.get("embeddings.doc_prefix"),
+            query_prefix=cfg.get("embeddings.query_prefix"),
+            batch_size=cfg.get("embeddings.batch_size"),
+            server_bin=cfg.get("embeddings.server_bin"),
+        )
     if provider == "openai":
         base_url = _resolve_base_url(cfg, "embeddings")
     elif provider == "ollama":
@@ -74,7 +91,18 @@ def make_generator(cfg: Config) -> Generator | None:
 def make_reranker(cfg: Config) -> Reranker | None:
     if not cfg.get("rerank.enabled"):
         return None
+    provider = cfg.get("rerank.provider")
     try:
+        if provider == "llama-server":
+            from ragx.providers.llama_server import LlamaServerReranker
+
+            return LlamaServerReranker(
+                base_url=cfg.get("rerank.base_url"),
+                gguf=cfg.get("rerank.gguf"),
+                server_bin=cfg.get("rerank.server_bin"),
+            )
+        if provider != "sentence-transformers":
+            raise RagxError(f"unknown rerank provider: {provider!r}")
         return STReranker(model=cfg.get("rerank.model"))
     except RagxError as exc:
         print(f"warning: reranker unavailable: {exc}", file=sys.stderr)

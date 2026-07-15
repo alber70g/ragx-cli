@@ -27,11 +27,12 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 config_app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(config_app, name="config")
 
-from ragx.cli import eval_cmd, inspect_cmd, pipeline  # noqa: E402  (needs `app` defined above)
+from ragx.cli import eval_cmd, inspect_cmd, models_cmd, pipeline  # noqa: E402  (needs `app` defined above)
 
 pipeline.register(app)
 inspect_cmd.register(app)
 eval_cmd.register(app)
+models_cmd.register(app)
 
 
 def _require_root() -> Path:
@@ -77,6 +78,14 @@ def init(
     else:
         cfg_path = write_default_config(root)
     typer.echo(f"created {cfg_path}")
+    if ask and typer.confirm(
+        "recommend + download models via LM Studio now? (rerun anytime: `ragx-cli models`)",
+        default=False,
+    ):
+        try:
+            models_cmd.run_flow(root)
+        except RagxError as exc:
+            fail(str(exc))
 
 
 def _counts(root: Path) -> tuple[int, int, int, int]:

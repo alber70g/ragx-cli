@@ -55,6 +55,12 @@ Other query flags: `--no-graph`, `--hops N`, `--explain`.
 - Changing `embeddings.model`, `chunking.*`, or `graph.edge_source` invalidates the index:
   commands fail loud on the manifest mismatch, and the fix is `ragx-cli index --full` —
   re-embeds everything, so confirm before running on a large corpus.
+- `ragx-cli models` picks + downloads an embedding/reranker combo. All files download via
+  LM Studio; serving is per engine — `--embed-engine llama-server|lm-studio` and
+  `--rerank-engine llama-server|sentence-transformers`. With both on `llama-server`
+  (the default when llama.cpp is installed), ragx auto-spawns/reaps the servers and
+  needs neither LM Studio nor huggingface.co at query time. Other flags: `--quality
+  fast|balanced|best|jina-nano`, `--yes`, `--dry-run`, `--json`.
 
 ## Why did/didn't a result appear?
 

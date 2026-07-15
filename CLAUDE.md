@@ -22,6 +22,9 @@ API contracts for every core module. Deferred feature specs live in `docs/`.
   hashing), pathspec (gitignore globs).
 - Providers speak **OpenAI-compatible HTTP**. Local default: LM Studio at
   `http://localhost:1234/v1`. `provider="ollama"` auto-switches to `:11434/v1`.
+  `embeddings.provider="llama-server"` instead auto-spawns `llama-server --embedding` on
+  `embeddings.gguf` (port 9813; shared lifecycle code in `providers/llama_process.py`) —
+  with the llama-server rerank engine, LM Studio is downloader-only at query time.
   Env fallbacks: `OPENAI_BASE_URL` (only while base_url is still the default) and
   `OPENAI_API_KEY` (only when `api_key_env` is unset); explicit config always wins.
 - Machine-level provider settings live in `~/.ragxrc` (TOML; ONLY the embeddings/
@@ -29,8 +32,11 @@ API contracts for every core module. Deferred feature specs live in `docs/`.
   ragx.toml < ~/.ragxrc — the rc OVERRIDES corpus values and logs a stderr warning
   per overridden key. Write via `ragx-cli config set --global <key> <value>`.
   `Config.save` never bakes rc values into the corpus file.
-- Reranker is always local: sentence-transformers CrossEncoder `BAAI/bge-reranker-v2-m3`
-  (optional extra `ragx-cli[rerank]`). LM Studio has NO /v1/rerank endpoint — verified; don't try.
+- Reranker is always local, two engines: sentence-transformers CrossEncoder (default,
+  `BAAI/bge-reranker-v2-m3`, optional extra `ragx-cli[rerank]`) or `rerank.provider=
+  "llama-server"` (llama.cpp `/v1/rerank` on a GGUF, auto-spawned from `rerank.gguf`;
+  GGUFs download via LM Studio — validated ≈ safetensors scores). LM Studio itself has
+  NO /v1/rerank endpoint — verified; don't try.
 
 ## Layout (core/CLI split is the one architectural rule — MCP server later rides on it)
 
@@ -57,10 +63,16 @@ src/ragx/
     indexer.py     #   run_index: discover->hash->chunk->embed->HNSW+store->kNN edges
     query.py       #   run_query: expansion->fan-out->RRF->traversal->rerank->combine; JSON serializers
     eval.py        #   recall@5/@10 + MRR over file-level ranking, injected query_fn
+    catalog.py     #   curated embedding/reranker catalog (tiers, prefixes) + spec detect
+    lmstudio.py    #   `lms` CLI wrapper: find/download (`lms get --yes`)/`lms ls --json`;
+                   #   LM Studio can't download plain safetensors — rerankers stay on HF
   providers/       # base.py protocols (Embedder/Generator/Reranker); openai_compat.py;
-                   # st_reranker.py; registry.py factories (env-var + api_key_env resolution)
+                   # st_reranker.py; llama_process.py (managed llama-server lifecycle) +
+                   # llama_server.py (rerank) + llama_embedder.py (embeddings);
+                   # registry.py factories (env-var + api_key_env resolution)
   cli/             # thin shells only: app.py (init/status/config + registration),
-                   # pipeline.py (index/query), inspect_cmd.py, eval_cmd.py, output.py
+                   # pipeline.py (index/query), inspect_cmd.py, eval_cmd.py, models_cmd.py
+                   # (recommend/download/configure models), output.py
 tests/             # 177 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
 ```
 

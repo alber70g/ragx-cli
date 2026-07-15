@@ -4,6 +4,33 @@ All notable changes to `ragx-cli` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-07-15
+
+### Added
+
+- **`ragx-cli models`**: recommends an embedding + reranker combo (quality tier,
+  RAM/macOS detection), downloads models through LM Studio (`lms get --yes`), and writes
+  the config to `ragx.toml` (with an `index --full` warning when the embedding model
+  changed). Scriptable: `--quality fast|balanced|best|jina-nano`, `--embed-engine`,
+  `--rerank-engine`, `--yes`, `--dry-run`, `--json` (schema `ragx.models.v1`).
+  Interactive `init` offers the flow as its final step. Embedding catalog:
+  EmbeddingGemma-300M / BGE-M3 / Qwen3-Embedding-0.6B / Jina-v5-nano (CC-BY-NC,
+  llama-server engine only); reranker: bge-reranker-v2-m3 (multilingual).
+- **`llama-server` rerank engine** (`rerank.provider = "llama-server"`): reranking via
+  llama.cpp's `/v1/rerank` on a GGUF (`rerank.gguf`), auto-spawning `llama-server`
+  (`rerank.server_bin`, `rerank.base_url`) when nothing is listening and terminating it
+  at exit. Reranker GGUFs download through LM Studio (`ragx-cli models --rerank-engine
+  llama-server`), so reranking needs **no direct huggingface.co access** and no torch/
+  sentence-transformers install. Q8_0 GGUFs validated against the safetensors originals
+  (scores within ~0.5 logit, identical ordering).
+- **`llama-server` embedding engine** (`embeddings.provider = "llama-server"`): embeddings
+  served by an auto-spawned `llama-server --embedding` on `embeddings.gguf` (same managed
+  lifecycle as the rerank engine; default port 9813). `ragx-cli models --embed-engine
+  llama-server` wires it up. With both engines on llama-server, LM Studio is purely a
+  model downloader — nothing but ragx-managed processes run at query time. Also unblocks
+  EuroBERT models (e.g. `jina-embeddings-v5-text-nano-retrieval-GGUF`) that LM Studio
+  downloads but cannot serve.
+
 ## [0.4.0] — 2026-07-15
 
 ### Changed (BREAKING)
