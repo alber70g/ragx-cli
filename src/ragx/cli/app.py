@@ -9,7 +9,7 @@ from pathlib import Path
 import typer
 
 from ragx.cli.init_prompt import collect_answers
-from ragx.cli.output import emit_json, fail
+from ragx.cli.output import emit_json, fail, migrate_confirm
 from ragx.core.config import (
     DEFAULTS,
     Config,
@@ -43,7 +43,7 @@ def _require_root() -> Path:
 
 def _load_config(root: Path) -> Config:
     try:
-        return Config.load(root)
+        return Config.load(root, confirm=migrate_confirm())
     except RagxError as exc:
         fail(str(exc))
 

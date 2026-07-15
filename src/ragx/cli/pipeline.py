@@ -7,7 +7,7 @@ from pathlib import Path
 
 import typer
 
-from ragx.cli.output import emit_json, fail
+from ragx.cli.output import emit_json, fail, migrate_confirm
 from ragx.core.config import Config, require_root
 from ragx.core.errors import RagxError
 from ragx.core.indexer import run_index
@@ -28,7 +28,7 @@ def index(
     """Chunk, embed, and index the corpus (full rebuild unless --changed)."""
     try:
         root = require_root(path)
-        cfg = Config.load(root)
+        cfg = Config.load(root, confirm=migrate_confirm())
         stats = run_index(root, cfg, make_embedder(cfg), changed_only=changed)
     except RagxError as exc:
         fail(str(exc))
@@ -59,7 +59,7 @@ def query(
         text = sys.stdin.read().strip()
     try:
         root = require_root()
-        cfg = Config.load(root)
+        cfg = Config.load(root, confirm=migrate_confirm())
         opts = QueryOptions(
             top=top if top is not None else cfg.get("query.top"),
             files_only=files_only,

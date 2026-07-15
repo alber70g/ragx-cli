@@ -4,6 +4,15 @@ All notable changes to `ragx-cli` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Legacy config self-heals**: finding a pre-0.3.0 `.ragx/config.toml` no longer fails
+  loud — on a TTY, `ragx-cli` asks before moving it to `ragx.toml` (declining prints the
+  `mv` and exits); non-interactive runs migrate automatically with a stderr notice. Both
+  files existing at once is still a hard error.
+
 ## [0.3.0] — 2026-07-14
 
 ### Changed (BREAKING)

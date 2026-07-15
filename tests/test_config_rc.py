@@ -55,12 +55,47 @@ def test_rc_applies_without_corpus_file(tmp_path, rc, caplog):
     assert not caplog.records
 
 
-def test_legacy_config_location_fails_loud(tmp_path, rc):
-    # pre-0.3.0 corpora kept config at .ragx/config.toml; loading must demand the move
+def _write_legacy(tmp_path):
     (tmp_path / ".ragx").mkdir()
     (tmp_path / ".ragx" / "config.toml").write_text("[graph]\nk = 12\n")
-    with pytest.raises(RagxError, match="config moved"):
+
+
+def test_legacy_config_auto_migrates_without_confirm(tmp_path, rc, caplog):
+    # pre-0.3.0 corpora self-heal: non-interactive loads just move the file, with a notice
+    _write_legacy(tmp_path)
+    with caplog.at_level(logging.WARNING, logger="ragx.config"):
+        cfg = Config.load(tmp_path)
+    assert cfg.get("graph.k") == 12
+    assert config_path(tmp_path).exists()
+    assert not (tmp_path / ".ragx" / "config.toml").exists()
+    assert any("migrated" in r.getMessage() for r in caplog.records)
+
+
+def test_legacy_config_confirm_accepted_migrates(tmp_path, rc):
+    _write_legacy(tmp_path)
+    prompts: list[str] = []
+    cfg = Config.load(tmp_path, confirm=lambda msg: prompts.append(msg) or True)
+    assert cfg.get("graph.k") == 12
+    assert config_path(tmp_path).exists()
+    assert len(prompts) == 1 and "config moved in 0.3.0" in prompts[0]
+
+
+def test_legacy_config_confirm_declined_fails_loud(tmp_path, rc):
+    # declining the prompt keeps the old fail-loud behavior and touches nothing
+    _write_legacy(tmp_path)
+    with pytest.raises(RagxError, match="not migrated"):
+        Config.load(tmp_path, confirm=lambda msg: False)
+    assert (tmp_path / ".ragx" / "config.toml").exists()
+    assert not config_path(tmp_path).exists()
+
+
+def test_legacy_and_new_config_both_present_fails_loud(tmp_path, rc):
+    # migrating over an existing ragx.toml could discard edits — never pick silently
+    _write_legacy(tmp_path)
+    config_path(tmp_path).write_text("[graph]\nk = 5\n")
+    with pytest.raises(RagxError, match="keep one"):
         Config.load(tmp_path)
+    assert (tmp_path / ".ragx" / "config.toml").exists()
 
 
 def test_root_found_via_config_file_alone(tmp_path):

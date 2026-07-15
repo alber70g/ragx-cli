@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +89,30 @@ def vectors_path(root: Path) -> Path:
     return root / RAGX_DIR / "vectors.hnsw"
 
 
+def _migrate_legacy(root: Path, confirm: Callable[[str], bool] | None) -> None:
+    """Self-heal a pre-0.3.0 corpus: move .ragx/config.toml to ragx.toml at the root.
+
+    `confirm` (interactive callers) is asked before touching anything; declining keeps
+    the old fail-loud error. Without it (agents, library use) the move just happens,
+    with a stderr notice. Both files existing stays a hard error — picking one could
+    silently discard edits."""
+    legacy = root / RAGX_DIR / "config.toml"
+    if not legacy.exists():
+        return
+    target = root / CONFIG_FILE
+    if target.exists():
+        raise RagxError(
+            f"both {target} and legacy {legacy} exist — config moved to ragx.toml "
+            f"in 0.3.0; keep one and delete the other"
+        )
+    if confirm is not None and not confirm(
+        f"config moved in 0.3.0: move legacy {legacy} to {target}?"
+    ):
+        raise RagxError(f"config not migrated — run `mv {legacy} {target}` to proceed")
+    legacy.rename(target)
+    log.warning("config moved in 0.3.0: migrated %s -> %s", legacy, target)
+
+
 def _deep_merge(base: dict, override: dict) -> dict:
     out = {k: dict(v) for k, v in base.items()}
     for section, values in override.items():
@@ -160,13 +185,13 @@ class Config:
         self.file_data = file_data if file_data is not None else data
 
     @classmethod
-    def load(cls, root: Path, rc: Path | None = None) -> Config:
-        legacy = root / RAGX_DIR / "config.toml"
-        if legacy.exists():
-            raise RagxError(
-                f"config moved in 0.3.0: found legacy {legacy} — "
-                f"run `mv {legacy} {root / CONFIG_FILE}`"
-            )
+    def load(
+        cls,
+        root: Path,
+        rc: Path | None = None,
+        confirm: Callable[[str], bool] | None = None,
+    ) -> Config:
+        _migrate_legacy(root, confirm)
         path = config_path(root)
         file_data: dict = {}
         if path.exists():

@@ -197,7 +197,7 @@ def test_eval_cmd_json_output(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(eval_cmd_mod, "load_queries", lambda path: [{"query": "q", "relevant_files": []}])
     monkeypatch.setattr(eval_cmd_mod, "require_root", lambda: tmp_path)
-    monkeypatch.setattr(eval_cmd_mod.Config, "load", classmethod(lambda cls, root: object()))
+    monkeypatch.setattr(eval_cmd_mod.Config, "load", classmethod(lambda cls, root, confirm=None: object()))
     monkeypatch.setattr(eval_cmd_mod, "make_embedder", lambda cfg: object())
     monkeypatch.setattr(
         eval_cmd_mod,
@@ -223,7 +223,7 @@ def test_eval_cmd_human_table(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(eval_cmd_mod, "load_queries", lambda path: [{"query": "q", "relevant_files": []}])
     monkeypatch.setattr(eval_cmd_mod, "require_root", lambda: tmp_path)
-    monkeypatch.setattr(eval_cmd_mod.Config, "load", classmethod(lambda cls, root: object()))
+    monkeypatch.setattr(eval_cmd_mod.Config, "load", classmethod(lambda cls, root, confirm=None: object()))
     monkeypatch.setattr(eval_cmd_mod, "make_embedder", lambda cfg: object())
     monkeypatch.setattr(
         eval_cmd_mod,

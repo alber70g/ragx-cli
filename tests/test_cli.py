@@ -8,6 +8,7 @@ import respx
 from typer.testing import CliRunner
 
 from ragx.cli.app import app
+from ragx.cli.output import migrate_confirm
 from ragx.core.config import CONFIG_FILE, Config
 
 runner = CliRunner()
@@ -124,14 +125,33 @@ def test_config_get_bogus_key(tmp_path, monkeypatch):
     assert result.exit_code == 2
 
 
-def test_legacy_config_location_exits_2_with_hint(tmp_path, monkeypatch):
+def test_legacy_config_auto_migrates_when_not_a_tty(tmp_path, monkeypatch):
+    # piped stdin (agents): the pre-0.3.0 config self-heals without a prompt
     (tmp_path / ".ragx").mkdir()
     (tmp_path / ".ragx" / "config.toml").write_text("[graph]\nk = 12\n")
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(app, ["config", "get", "graph.k"])
-    assert result.exit_code == 2
-    assert "config moved" in result.output
+    assert result.exit_code == 0
+    assert result.output.strip() == "12"
+    assert (tmp_path / CONFIG_FILE).exists()
+    assert not (tmp_path / ".ragx" / "config.toml").exists()
+
+
+def test_migrate_confirm_prompts_only_on_tty(monkeypatch):
+    class Tty:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr("sys.stdin", Tty())
+    assert migrate_confirm() is not None
+
+    class Pipe:
+        def isatty(self):
+            return False
+
+    monkeypatch.setattr("sys.stdin", Pipe())
+    assert migrate_confirm() is None
 
 
 def test_config_without_init(tmp_path, monkeypatch):

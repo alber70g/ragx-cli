@@ -438,8 +438,10 @@ committed with your corpus; `.ragx/` (index data) is safe to gitignore — a fre
 runs `ragx-cli index`. The config file itself is never indexed as corpus content.
 
 > **Upgrading from ≤0.2.x:** the config moved from `.ragx/config.toml` to `ragx.toml` at the
-> corpus root. Commands fail with a migration hint until you
-> `mv .ragx/config.toml ragx.toml`. The index itself is untouched.
+> corpus root, and ragx-cli migrates it for you on first use: on a TTY it asks before moving
+> the file (declining leaves everything untouched and prints the `mv` to run yourself);
+> piped/agent runs migrate automatically with a notice on stderr. If both files exist,
+> commands fail loud — keep one and delete the other. The index itself is untouched.
 
 `ragx-cli init` is **interactive when run on a TTY**: it probes the default LM Studio
 (`localhost:1234`) and Ollama (`localhost:11434`) ports, lists the models each server
@@ -483,5 +485,5 @@ unchecked ones are next up. Release history: [CHANGELOG.md](CHANGELOG.md).
 - [ ] **[Temporal weighting](docs/feature-temporal-weighting.md)**: opt-in `--since`/`--until`/`--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime
 - [x] **Release**: publish to PyPI as `ragx-cli` (plain `ragx` is name-blocked, too similar to an existing project) so `uvx ragx-cli` works out of the box
 
-Development: `uv sync --group dev && uv run pytest`. 173 tests; module contracts live in
+Development: `uv sync --group dev && uv run pytest`. 177 tests; module contracts live in
 `CONTRACTS.md` / `CONTRACTS-PHASE23.md`.

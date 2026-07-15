@@ -7,7 +7,7 @@ from pathlib import Path
 
 import typer
 
-from ragx.cli.output import emit_json, fail
+from ragx.cli.output import emit_json, fail, migrate_confirm
 from ragx.core.config import Config, require_root
 from ragx.core.errors import RagxError
 from ragx.core.eval import evaluate, load_queries
@@ -45,7 +45,7 @@ def eval_cmd(
 
     try:
         root = require_root()
-        cfg = Config.load(root)
+        cfg = Config.load(root, confirm=migrate_confirm())
         embedder = make_embedder(cfg)
         generator = make_generator(cfg) if any(_BUILTIN_CONFIGS[n].expand for n in names) else None
         reranker = make_reranker(cfg) if any(_BUILTIN_CONFIGS[n].rerank for n in names) else None
