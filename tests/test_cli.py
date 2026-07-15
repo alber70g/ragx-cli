@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import tomllib
+from importlib import metadata
+from pathlib import Path
 
 import httpx
 import respx
 from typer.testing import CliRunner
 
-from ragx.cli.app import app
+from ragx.cli.app import REPO_URL, app
 from ragx.cli.output import migrate_confirm
 from ragx.core.config import CONFIG_FILE, Config
 
@@ -101,6 +103,39 @@ def test_init_yes_skips_prompts(tmp_path):
     assert result.exit_code == 0
     data = _read_config(tmp_path)
     assert data["embeddings"]["provider"] == "openai"
+
+
+def test_version_outside_corpus(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert f"ragx-cli {metadata.version('ragx-cli')}" in result.stdout
+    assert REPO_URL in result.stdout
+    assert "config:" not in result.stdout
+    assert "global:" not in result.stdout
+
+
+def test_version_shows_local_models_and_rc(tmp_path, monkeypatch):
+    runner.invoke(app, ["init", str(tmp_path)])
+    monkeypatch.chdir(tmp_path)
+    (Path.home() / ".ragxrc").write_text('[embeddings]\nmodel = "rc-model"\n')
+
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert str(tmp_path / CONFIG_FILE) in result.stdout
+    # effective view: the rc override wins over the corpus value
+    assert "embeddings: openai/rc-model" in result.stdout
+    assert "rerank: sentence-transformers/BAAI/bge-reranker-v2-m3" in result.stdout
+    assert "embeddings.model = rc-model" in result.stdout
+
+
+def test_version_marks_disabled_stages(tmp_path, monkeypatch):
+    runner.invoke(app, ["init", str(tmp_path)])
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["config", "set", "expansion.enabled", "false"])
+
+    result = runner.invoke(app, ["--version"])
+    assert "expansion: openai/qwen3.5-9b (disabled)" in result.stdout
 
 
 def test_config_get_set_roundtrip(tmp_path, monkeypatch):

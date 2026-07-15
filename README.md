@@ -25,6 +25,7 @@ ragx-cli index                 # chunk -> embed -> HNSW + kNN similarity graph (
 ragx-cli query "why did we switch build tools?" --json --files-only
 ragx-cli index --full          # full rebuild: re-chunk + re-embed everything
 ragx-cli models                # recommend + download an embedding/reranker combo via LM Studio
+ragx-cli --version             # version, repo, and the effective models (corpus config + ~/.ragxrc overrides)
 ```
 
 Runs against any OpenAI-compatible embedding endpoint (LM Studio, Ollama, OpenAI). Reranking

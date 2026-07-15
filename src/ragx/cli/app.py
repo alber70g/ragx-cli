@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from importlib import metadata
 from pathlib import Path
 
 import typer
@@ -16,12 +17,16 @@ from ragx.core.config import (
     CONFIG_FILE,
     config_path,
     db_path,
+    find_root,
+    load_rc,
     rc_path,
     require_root,
     write_default_config,
     write_rc_value,
 )
 from ragx.core.errors import RagxError
+
+REPO_URL = "https://github.com/alber70g/ragx-cli"
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 config_app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -33,6 +38,55 @@ pipeline.register(app)
 inspect_cmd.register(app)
 eval_cmd.register(app)
 models_cmd.register(app)
+
+
+def _print_version() -> None:
+    try:
+        version = metadata.version("ragx-cli")
+    except metadata.PackageNotFoundError:
+        version = "unknown"
+    typer.echo(f"ragx-cli {version}")
+    typer.echo(REPO_URL)
+    root = find_root()
+    if root is not None:
+        try:
+            cfg = Config.load(root, confirm=migrate_confirm())
+            typer.echo(f"config: {config_path(root)}")
+            for section in ("embeddings", "expansion", "rerank"):
+                line = f"  {section}: {cfg.get(f'{section}.provider')}/{cfg.get(f'{section}.model')}"
+                if cfg.data[section].get("enabled") is False:
+                    line += " (disabled)"
+                typer.echo(line)
+        except RagxError as exc:
+            typer.echo(f"config: unreadable ({exc})")
+    rc = rc_path()
+    if rc.exists():
+        typer.echo(f"global: {rc}")
+        try:
+            for section, values in load_rc().items():
+                for key, value in values.items():
+                    typer.echo(f"  {section}.{key} = {value}")
+        except RagxError as exc:
+            typer.echo(f"  unreadable ({exc})")
+
+
+def _version_option(value: bool) -> None:
+    if value:
+        _print_version()
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_option,
+        is_eager=True,
+        help="show version, repo, and configured models (local + ~/.ragxrc)",
+    ),
+) -> None:
+    """Similarity-graph RAG for your files."""
 
 
 def _require_root() -> Path:
