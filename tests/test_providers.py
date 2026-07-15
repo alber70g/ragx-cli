@@ -200,6 +200,42 @@ def test_make_reranker_model_load_failure_returns_none_and_warns(monkeypatch, ca
     assert "HF_ENDPOINT" in err
 
 
+def test_st_reranker_first_retry_warning_emits_manual_install_hint(monkeypatch, capsys):
+    """The first HF download-retry warning triggers a one-shot README pointer."""
+    import logging
+    import sys
+    import types
+
+    class _RetryingCrossEncoder:
+        def __init__(self, model):
+            hub_log = logging.getLogger("huggingface_hub.utils._http")
+            for _ in range(2):
+                hub_log.warning(
+                    "'_ssl.c:1015: The handshake operation timed out' thrown while "
+                    "requesting HEAD https://huggingface.co/x/resolve/main/modules.json"
+                )
+                hub_log.warning("Retrying in 1s [Retry 1/5].")
+            raise OSError("timed out")
+
+    fake = types.ModuleType("sentence_transformers")
+    fake.CrossEncoder = _RetryingCrossEncoder
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake)
+
+    from ragx.core.errors import RagxError
+    from ragx.providers.st_reranker import STReranker, _DownloadHintHandler
+
+    with pytest.raises(RagxError):
+        STReranker("BAAI/bge-reranker-v2-m3")
+
+    err = capsys.readouterr().err
+    assert err.count("install the model manually") == 1
+    assert "#reranker-on-restricted-networks" in err
+    assert not any(
+        isinstance(h, _DownloadHintHandler)
+        for h in logging.getLogger("huggingface_hub").handlers
+    )
+
+
 def test_api_key_env_resolved_and_sent(monkeypatch):
     monkeypatch.setenv("RAGX_TEST_KEY", "sk-test-123")
     cfg = _config({"embeddings": {"api_key_env": "RAGX_TEST_KEY"}})
