@@ -1,6 +1,6 @@
 [project]
 name = "ragx-cli"
-version = "0.3.3"
+version = "0.4.0"
 description = "Similarity-graph RAG CLI: index a corpus into a chunk-level embedding graph and query it"
 readme = "README.md"
 license = "MIT"
