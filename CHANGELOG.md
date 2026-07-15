@@ -4,6 +4,22 @@ All notable changes to `ragx-cli` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — 2026-07-15
+
+### Changed
+
+- **`ragx-cli models` interactive flow redesigned** around context → choice → consequence →
+  commit: a machine header (RAM, platform, `llama-server`/`lms` detection) prints first;
+  the quality tier is picked from a numbered comparison table (model, size, languages,
+  context, license) and the serving engines from numbered menus with one-line tradeoffs —
+  recommended defaults marked `»`, invalid input re-prompts; a plan step (download sizes,
+  `already downloaded ✓`, config sections, re-index consequence) shows before the confirm.
+  Behavior changes: on <8 GB RAM machines an interactive pick of `balanced`/`best` is
+  confirmed and then honored instead of silently downgraded (non-interactive runs keep the
+  auto-downgrade); `--quality jina-nano` without `--embed-engine` now locks the embedding
+  engine to `llama-server` instead of erroring (an explicit `--embed-engine lm-studio`
+  still fails loud). Flags, `--json` output, and the non-interactive contract are unchanged.
+
 ## [0.5.0] — 2026-07-15
 
 ### Added

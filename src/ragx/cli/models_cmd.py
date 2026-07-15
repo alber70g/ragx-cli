@@ -4,11 +4,13 @@ onto the main app by app.py; `init` routes here as an optional final step."""
 
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
 import typer
 
+from ragx.cli import models_ui as ui
 from ragx.cli.output import emit_json, fail, migrate_confirm
 from ragx.core import lmstudio
 from ragx.core.catalog import QUALITY_TIERS, detect_specs, recommend
@@ -61,27 +63,40 @@ def run_flow(
     """The actual flow, callable from `init`. Raises RagxError on failure."""
     cfg = Config.load(root, confirm=migrate_confirm())
     interactive = sys.stdin.isatty() and not yes
+    specs = detect_specs()
+    llama_found = shutil.which("llama-server") is not None
+    lms = lmstudio.find_lms() if (interactive or not dry_run) else None
+    ui.header(specs, llama_found, lms_found=None if (dry_run and not interactive) else lms is not None)
+
     if quality is None:
         if not interactive:
             raise RagxError(f"--quality required when not interactive ({'/'.join(QUALITY_TIERS)})")
-        quality = typer.prompt(f"  quality ({'/'.join(QUALITY_TIERS)})", default="balanced")
-    engine = _pick_engine(
-        "rerank engine", rerank_engine, ("llama-server", "sentence-transformers"),
-        interactive, fallback="sentence-transformers",
-    )
-    emb_engine = _pick_engine(
-        "embedding engine", embed_engine, ("llama-server", "lm-studio"),
-        interactive, fallback="lm-studio",
+        quality = ui.pick_tier(specs)
+    embedding, reranker, notes = recommend(quality, specs, enforce_ram=not interactive)
+
+    if embedding.requires_llama_server and embed_engine != "llama-server":
+        if embed_engine is not None:
+            raise RagxError(
+                f"{embedding.label} can only be served by the llama-server engine "
+                "(LM Studio downloads it but cannot serve EuroBERT models) — "
+                "rerun with --embed-engine llama-server"
+            )
+        emb_engine = "llama-server"
+        lock_note = f"embedding engine locked to llama-server — LM Studio cannot serve {embedding.label}"
+        if interactive:
+            ui.echo(f"\n   → {lock_note}")
+        else:
+            notes.append(lock_note)
+    else:
+        emb_engine = _resolve_engine(
+            "embedding engine", embed_engine, ui.EMBED_ENGINES,
+            interactive, llama_found, fallback="lm-studio",
+        )
+    engine = _resolve_engine(
+        "rerank engine", rerank_engine, ui.RERANK_ENGINES,
+        interactive, llama_found, fallback="sentence-transformers",
     )
 
-    specs = detect_specs()
-    embedding, reranker, notes = recommend(quality, specs)
-    if embedding.requires_llama_server and emb_engine != "llama-server":
-        raise RagxError(
-            f"{embedding.label} can only be served by the llama-server engine "
-            "(LM Studio downloads it but cannot serve EuroBERT models) — "
-            "rerun with --embed-engine llama-server"
-        )
     engine_desc = (
         "llama.cpp llama-server, GGUF downloaded via LM Studio — no huggingface.co needed"
         if engine == "llama-server"
@@ -90,8 +105,8 @@ def run_flow(
     emb_desc = (
         "llama-server auto-spawned by ragx" if emb_engine == "llama-server" else "served by LM Studio"
     )
-    _echo(f"machine: {specs.ram_gb:.0f} GB RAM, {'macOS' if specs.macos else sys.platform}")
-    _echo(f"embedding: {embedding.label} ({embedding.notes}) — {emb_desc}")
+    spec_line = f"{embedding.params}, {embedding.languages} languages, {embedding.context} context"
+    _echo(f"embedding: {embedding.label} ({spec_line}) — {emb_desc}")
     _echo(f"reranker:  {reranker.label} ({reranker.notes}) — via {engine_desc}")
     for note in notes:
         _echo(f"note: {note}")
@@ -100,23 +115,39 @@ def run_flow(
         _finish(json_out, embedding, reranker, notes, engine=engine, emb_engine=emb_engine,
                 downloaded=False, config_updated=False, reindex_required=False)
         return
-    if interactive and not typer.confirm("download and update ragx.toml?", default=True):
-        raise typer.Exit(code=0)
 
-    lms = lmstudio.find_lms()
     if lms is None:
         raise RagxError(INSTALL_HINT)
 
+    emb_frag = embedding.gguf_fragment if emb_engine == "llama-server" else embedding.repo_fragment
+    emb_pre = lmstudio.find_installed(lms, emb_frag)
+    rr_pre = lmstudio.find_installed(lms, reranker.gguf_fragment) if engine == "llama-server" else None
+
+    if interactive:
+        if emb_pre is not None and emb_pre.model_key == cfg.get("embeddings.model"):
+            reindex_line = "not needed — embedding model unchanged"
+        else:
+            reindex_line = "REQUIRED — embedding model changes; run `ragx-cli index --full` after"
+        ui.show_plan(embedding=embedding, reranker=reranker, emb_engine=emb_engine,
+                     rerank_engine=engine, emb_installed=emb_pre is not None,
+                     rr_installed=rr_pre is not None, reindex_line=reindex_line)
+        if not typer.confirm("   proceed — download and update ragx.toml?", default=True, err=True):
+            raise typer.Exit(code=0)
+
     embed_updates: list[tuple[str, str]]
     if emb_engine == "llama-server":
-        installed, downloaded = _ensure_downloaded(lms, embedding.gguf_ref, embedding.gguf_fragment)
+        installed, downloaded = _ensure_downloaded(
+            lms, embedding.gguf_ref, embedding.gguf_fragment, pre=emb_pre
+        )
         embed_updates = [
             ("embeddings.provider", "llama-server"),
             ("embeddings.gguf", str(lmstudio.models_root() / installed.path)),
             ("embeddings.base_url", "http://127.0.0.1:9813/v1"),
         ]
     else:
-        installed, downloaded = _ensure_downloaded(lms, embedding.ref, embedding.repo_fragment)
+        installed, downloaded = _ensure_downloaded(
+            lms, embedding.ref, embedding.repo_fragment, pre=emb_pre
+        )
         embed_updates = [
             ("embeddings.provider", "openai"),
             ("embeddings.gguf", ""),
@@ -125,7 +156,9 @@ def run_flow(
 
     rerank_updates: list[tuple[str, str]]
     if engine == "llama-server":
-        gguf_model, gguf_downloaded = _ensure_downloaded(lms, reranker.gguf_ref, reranker.gguf_fragment)
+        gguf_model, gguf_downloaded = _ensure_downloaded(
+            lms, reranker.gguf_ref, reranker.gguf_fragment, pre=rr_pre
+        )
         downloaded = downloaded or gguf_downloaded
         gguf_path = str(lmstudio.models_root() / gguf_model.path)
         rerank_updates = [("rerank.provider", "llama-server"), ("rerank.gguf", gguf_path),
@@ -156,29 +189,28 @@ def run_flow(
             model_key=installed.model_key)
 
 
-def _pick_engine(
-    label: str, value: str | None, engines: tuple[str, str], interactive: bool, *, fallback: str
+def _resolve_engine(
+    label: str, value: str | None, options: tuple[tuple[str, str], ...],
+    interactive: bool, llama_found: bool, *, fallback: str,
 ) -> str:
-    """Explicit flag wins; otherwise default to llama-server when the binary is present
-    (fully ragx-managed, no huggingface.co), falling back to `fallback`."""
+    """Explicit flag wins; interactive shows a numbered menu; otherwise default to
+    llama-server when the binary is present (fully ragx-managed, no huggingface.co),
+    falling back to `fallback`."""
+    names = tuple(name for name, _ in options)
     if value is not None:
-        if value not in engines:
-            raise RagxError(f"{label} must be one of {'/'.join(engines)}")
+        if value not in names:
+            raise RagxError(f"{label} must be one of {'/'.join(names)}")
         return value
-    import shutil
-
-    default = "llama-server" if shutil.which("llama-server") else fallback
+    default = "llama-server" if llama_found else fallback
     if interactive:
-        picked = typer.prompt(f"  {label} ({'/'.join(engines)})", default=default)
-        if picked not in engines:
-            raise RagxError(f"{label} must be one of {'/'.join(engines)}")
-        return picked
+        return ui.pick_engine(label, options, default, llama_found)
     return default
 
 
-def _ensure_downloaded(lms: str, ref: str, fragment: str):
-    """Download `ref` via LM Studio unless a model matching `fragment` is already there."""
-    installed = lmstudio.find_installed(lms, fragment)
+def _ensure_downloaded(lms: str, ref: str, fragment: str, pre: lmstudio.InstalledModel | None = None):
+    """Download `ref` via LM Studio unless a model matching `fragment` is already there
+    (`pre` = an earlier find_installed result to reuse)."""
+    installed = pre if pre is not None else lmstudio.find_installed(lms, fragment)
     if installed is not None:
         _echo(f"already downloaded: {installed.model_key}")
         return installed, False

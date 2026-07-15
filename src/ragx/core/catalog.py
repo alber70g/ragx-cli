@@ -18,6 +18,8 @@ from ragx.core.errors import RagxError
 
 QUALITY_TIERS = ("fast", "balanced", "best", "jina-nano")
 
+LOW_RAM_GB = 8.0
+
 
 @dataclass(frozen=True)
 class EmbeddingChoice:
@@ -27,7 +29,11 @@ class EmbeddingChoice:
     repo_fragment: str  # substring that identifies it in `lms ls --json` output
     doc_prefix: str
     query_prefix: str
-    notes: str
+    params: str  # parameter count, for display ("308M")
+    languages: str  # language coverage, for display ("100+")
+    context: str  # context window, for display ("2K")
+    download_mb: int  # approximate download size shown in the plan step
+    notes: str  # short qualitative note for the interactive picker table
     # llama-server engine: explicit GGUF repo (the catalog-id ref may resolve to MLX,
     # which llama-server can't load) + the fragment locating the downloaded .gguf file
     gguf_ref: str
@@ -42,6 +48,7 @@ class RerankerChoice:
     label: str
     model: str  # HF repo id, loadable by sentence-transformers CrossEncoder
     languages: str
+    download_mb: int  # approximate download size shown in the plan step
     notes: str
     # llama-server engine: Q8_0 GGUF downloadable via LM Studio (validated against the
     # safetensors originals — scores within ~0.5 logit, identical ordering)
@@ -57,7 +64,11 @@ EMBEDDINGS: dict[str, EmbeddingChoice] = {
         repo_fragment="embeddinggemma",
         doc_prefix="title: none | text: ",
         query_prefix="task: search result | query: ",
-        notes="308M, 100+ languages, 2048-token context",
+        params="308M",
+        languages="100+",
+        context="2K",
+        download_mb=300,
+        notes="lightest; small corpora, low RAM",
         gguf_ref="https://huggingface.co/lmstudio-community/embeddinggemma-300m-qat-GGUF",
         gguf_fragment="embeddinggemma-300m-qat",
     ),
@@ -68,7 +79,11 @@ EMBEDDINGS: dict[str, EmbeddingChoice] = {
         repo_fragment="bge-m3",
         doc_prefix="",
         query_prefix="",
-        notes="568M, ~100 languages, 8192-token context; ragx's benchmarked production model",
+        params="568M",
+        languages="~100",
+        context="8K",
+        download_mb=600,
+        notes="ragx's benchmarked production model",
         gguf_ref="https://huggingface.co/gaianet/bge-m3-GGUF",
         gguf_fragment="bge-m3",
     ),
@@ -82,7 +97,11 @@ EMBEDDINGS: dict[str, EmbeddingChoice] = {
             "Instruct: Given a web search query, retrieve relevant passages that answer "
             "the query\nQuery: "
         ),
-        notes="0.6B, 100+ languages, 32K context",
+        params="0.6B",
+        languages="100+",
+        context="32K",
+        download_mb=640,
+        notes="highest quality; slower indexing",
         gguf_ref="https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF",
         gguf_fragment="qwen3-embedding-0.6b",
     ),
@@ -93,7 +112,11 @@ EMBEDDINGS: dict[str, EmbeddingChoice] = {
         repo_fragment="v5-nano-retrieval-q8_0",
         doc_prefix="Document: ",
         query_prefix="Query: ",
-        notes="239M, best-in-class sub-500M quality; CC-BY-NC license (non-commercial use only)",
+        params="239M",
+        languages="multi",
+        context="8K",
+        download_mb=250,
+        notes="best sub-500M quality; CC-BY-NC (non-commercial); llama-server only",
         gguf_ref="https://huggingface.co/jinaai/jina-embeddings-v5-text-nano-retrieval-GGUF@Q8_0",
         gguf_fragment="v5-nano-retrieval-q8_0",
         requires_llama_server=True,
@@ -104,6 +127,7 @@ RERANKER = RerankerChoice(
     label="BGE reranker v2-m3",
     model="BAAI/bge-reranker-v2-m3",
     languages="multilingual",
+    download_mb=600,
     notes="568M, multilingual; keeps the measured Dutch-query recall win",
     gguf_ref="https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF@Q8_0",
     gguf_fragment="bge-reranker-v2-m3-q8_0",
@@ -124,15 +148,33 @@ def detect_specs() -> Specs:
     return Specs(ram_gb=ram, macos=sys.platform == "darwin")
 
 
-def recommend(quality: str, specs: Specs) -> tuple[EmbeddingChoice, RerankerChoice, list[str]]:
-    """Pick an embedding + reranker combo; returns (embedding, reranker, notes)."""
+def ram_limited(specs: Specs) -> bool:
+    """True when RAM is known and below the balanced/best comfort threshold."""
+    return 0 < specs.ram_gb < LOW_RAM_GB
+
+
+def recommend(
+    quality: str, specs: Specs, *, enforce_ram: bool = True
+) -> tuple[EmbeddingChoice, RerankerChoice, list[str]]:
+    """Pick an embedding + reranker combo; returns (embedding, reranker, notes).
+
+    enforce_ram=False (interactive callers whose user already confirmed the pick)
+    keeps the requested tier on low-RAM machines and warns instead of downgrading.
+    """
     if quality not in EMBEDDINGS:
         raise RagxError(f"quality must be one of {'/'.join(QUALITY_TIERS)}, got {quality!r}")
     notes: list[str] = []
     tier = quality
-    if 0 < specs.ram_gb < 8 and tier in ("balanced", "best"):
-        notes.append(f"{specs.ram_gb:.0f} GB RAM detected — dropping to the fast embedding tier")
-        tier = "fast"
+    if ram_limited(specs) and tier in ("balanced", "best"):
+        if enforce_ram:
+            notes.append(
+                f"{specs.ram_gb:.0f} GB RAM detected — dropping to the fast embedding tier"
+            )
+            tier = "fast"
+        else:
+            notes.append(
+                f"{specs.ram_gb:.0f} GB RAM detected — the {tier} tier may be slow on this machine"
+            )
     if tier == "jina-nano":
         notes.append("jina-nano is CC-BY-NC licensed — non-commercial use only")
     return EMBEDDINGS[tier], RERANKER, notes

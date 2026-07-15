@@ -42,6 +42,15 @@ def test_recommend_downgrades_on_low_ram():
     assert emb.tier == "best"
 
 
+def test_recommend_no_enforce_warns_instead_of_downgrading():
+    emb, _, notes = recommend("best", Specs(ram_gb=4.0, macos=False), enforce_ram=False)
+    assert emb.tier == "best"
+    assert any("may be slow" in n for n in notes)
+    # plenty of RAM: no warning either way
+    _, _, notes = recommend("best", BIG, enforce_ram=False)
+    assert notes == []
+
+
 def test_recommend_rejects_unknown_quality():
     with pytest.raises(RagxError):
         recommend("ludicrous", BIG)
@@ -299,6 +308,120 @@ def test_models_rejects_unknown_engine(corpus):
         app, ["models", "--quality", "fast", "--rerank-engine", "bogus", "--yes"]
     )
     assert result.exit_code == 2
+
+
+def test_models_jina_auto_locks_embed_engine_when_unset(corpus, monkeypatch, tmp_path):
+    """quality=jina-nano without --embed-engine no longer errors: the engine is
+    locked to llama-server (the only one that can serve it)."""
+    gguf = lmstudio.InstalledModel(
+        model_key="v5-nano-retrieval", type="embedding", format="gguf",
+        path="jinaai/jina-embeddings-v5-text-nano-retrieval-GGUF/v5-nano-retrieval-Q8_0.gguf",
+        size_bytes=1,
+    )
+    monkeypatch.setattr(lmstudio, "find_lms", lambda: "/fake/lms")
+    monkeypatch.setattr(lmstudio, "find_installed", lambda lms, fragment: gguf)
+    monkeypatch.setattr(lmstudio, "models_root", lambda: tmp_path / "lmsmodels")
+    result = runner.invoke(
+        app, ["models", "--quality", "jina-nano", "--rerank-engine", "llama-server",
+              "--yes", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    doc = json.loads(result.stdout)
+    assert doc["embedding"]["engine"] == "llama-server"
+    assert any("locked" in n for n in doc["notes"])
+    cfg = Config.load(corpus)
+    assert cfg.get("embeddings.provider") == "llama-server"
+
+
+# --- interactive flow ---------------------------------------------------------
+
+
+def _script_prompts(monkeypatch, answers, confirms):
+    """Feed scripted answers into the numbered pickers and confirms; a TTY stdin
+    makes run_flow take the interactive branch (prompts never touch real stdin)."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=lambda: True))
+    answer_iter, confirm_iter = iter(answers), iter(confirms)
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: next(answer_iter))
+    monkeypatch.setattr("typer.confirm", lambda *a, **k: next(confirm_iter))
+
+
+def test_pick_numbered_reprompts_until_valid(monkeypatch):
+    from ragx.cli import models_ui
+
+    answers = iter(["9", "abc", "2"])
+    monkeypatch.setattr("typer.prompt", lambda *a, **k: next(answers))
+    assert models_ui.pick_numbered(["a", "b", "c"], default=1) == 2
+
+
+def test_pick_tier_low_ram_defaults_and_override(monkeypatch):
+    from ragx.cli import models_ui
+
+    low = Specs(ram_gb=4.0, macos=False)
+    # decline the RAM override for "best", then settle on "fast"
+    _script_prompts(monkeypatch, answers=["3", "1"], confirms=[False])
+    assert models_ui.pick_tier(low) == "fast"
+    # confirm the override: the explicit choice is honored
+    _script_prompts(monkeypatch, answers=["3"], confirms=[True])
+    assert models_ui.pick_tier(low) == "best"
+
+
+def test_models_interactive_flow_plans_then_writes(corpus, monkeypatch, capsys):
+    from ragx.cli.models_cmd import run_flow
+    from ragx.core.catalog import Specs as SpecsCls
+
+    installed = lmstudio.InstalledModel(
+        model_key="text-embedding-bge-m3", type="embedding", format="gguf",
+        path="gaianet/bge-m3-GGUF/x.gguf", size_bytes=1,
+    )
+    monkeypatch.setattr("ragx.cli.models_cmd.detect_specs", lambda: SpecsCls(32.0, True))
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(lmstudio, "find_lms", lambda: "/fake/lms")
+    monkeypatch.setattr(lmstudio, "find_installed", lambda lms, fragment: installed)
+    monkeypatch.setattr(
+        lmstudio, "download",
+        lambda lms, ref: pytest.fail("must not download an installed model"),
+    )
+    # tier 2 (balanced), embed engine 2 (lm-studio), rerank engine 2 (sentence-transformers)
+    _script_prompts(monkeypatch, answers=["2", "2", "2"], confirms=[True])
+
+    run_flow(corpus)
+
+    err = capsys.readouterr().err
+    assert "machine:" in err
+    assert "── embedding model" in err
+    assert "── plan" in err
+    assert "already downloaded ✓" in err
+    cfg = Config.load(corpus)
+    assert cfg.get("embeddings.model") == "text-embedding-bge-m3"
+    assert cfg.get("embeddings.provider") == "openai"
+    assert cfg.get("rerank.provider") == "sentence-transformers"
+
+
+def test_models_interactive_jina_skips_embed_engine_prompt(corpus, monkeypatch, tmp_path):
+    from ragx.cli.models_cmd import run_flow
+    from ragx.core.catalog import Specs as SpecsCls
+
+    gguf = lmstudio.InstalledModel(
+        model_key="v5-nano-retrieval", type="embedding", format="gguf",
+        path="jinaai/jina-embeddings-v5-text-nano-retrieval-GGUF/v5-nano-retrieval-Q8_0.gguf",
+        size_bytes=1,
+    )
+    monkeypatch.setattr("ragx.cli.models_cmd.detect_specs", lambda: SpecsCls(32.0, True))
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(lmstudio, "find_lms", lambda: "/fake/lms")
+    monkeypatch.setattr(lmstudio, "find_installed", lambda lms, fragment: gguf)
+    monkeypatch.setattr(lmstudio, "models_root", lambda: tmp_path / "lmsmodels")
+    # exactly ONE prompt expected (rerank engine) — an embed-engine prompt would
+    # exhaust the iterator and fail the test
+    _script_prompts(monkeypatch, answers=["1"], confirms=[True])
+
+    run_flow(corpus, quality="jina-nano")
+
+    cfg = Config.load(corpus)
+    assert cfg.get("embeddings.provider") == "llama-server"
+    assert cfg.get("rerank.provider") == "llama-server"
 
 
 def test_init_routes_into_models_flow(tmp_path, monkeypatch):

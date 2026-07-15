@@ -297,8 +297,19 @@ Full write-ups: `research/bge-m3-dense-q8-vs-nomic-q4-benchmark-2026-07-12-workt
 
 `ragx-cli models` recommends an embedding + reranker combo, downloads the embedding model
 **through LM Studio** (`lms get` — one download path, plays well with restricted networks),
-pre-fetches the reranker from Hugging Face, and writes both to `ragx.toml`. Interactive on a
-TTY (quality tier + engine questions, RAM auto-detected); scriptable via flags:
+pre-fetches the reranker from Hugging Face, and writes both to `ragx.toml`. On a TTY it walks
+three steps — context first, consequences before anything is written:
+
+1. **machine header** — detected RAM, platform, whether `llama-server` is on PATH and the
+   `lms` CLI was found (this is what drives the recommended defaults);
+2. **numbered menus** — the embedding tier table (model, size, languages, context, license)
+   and one menu per serving engine with a one-line tradeoff each; the recommended default is
+   marked `»` (Enter accepts), invalid input re-prompts;
+3. **plan** — what will be downloaded (or `already downloaded ✓`) with approximate sizes,
+   which config sections change, and whether a re-index is required — all shown *before*
+   the final confirm.
+
+Scriptable via flags:
 
 ```bash
 ragx-cli models                                        # interactive
@@ -308,12 +319,12 @@ ragx-cli models --quality fast --dry-run               # recommend only, change 
 
 The curated catalog (every entry verified working end-to-end):
 
-| tier | embedding model | notes |
-|---|---|---|
-| `fast` | EmbeddingGemma 300M | 308M, 100+ languages, 2048-token context |
-| `balanced` | BGE-M3 | ragx's benchmarked production model (~100 languages) |
-| `best` | Qwen3-Embedding-0.6B | 100+ languages, 32K context |
-| `jina-nano` | Jina embeddings v5 nano | 239M, best-in-class sub-500M; **CC-BY-NC (non-commercial)**; llama-server engine only — LM Studio downloads it but can't serve EuroBERT |
+| tier | embedding model | size | langs | ctx | notes |
+|---|---|---|---|---|---|
+| `fast` | EmbeddingGemma 300M | 308M | 100+ | 2K | lightest; small corpora, low RAM |
+| `balanced` | BGE-M3 | 568M | ~100 | 8K | ragx's benchmarked production model |
+| `best` | Qwen3-Embedding-0.6B | 0.6B | 100+ | 32K | highest quality; slower indexing |
+| `jina-nano` | Jina embeddings v5 nano | 239M | multi | 8K | best sub-500M; **CC-BY-NC (non-commercial)**; llama-server engine only — LM Studio downloads it but can't serve EuroBERT (picking it locks the embedding engine to llama-server automatically; an explicit `--embed-engine lm-studio` still fails loud) |
 
 **Serving engines.** Embeddings run through `--embed-engine`: **`llama-server`** (default when
 llama.cpp is installed — ragx auto-spawns `llama-server --embedding` on the downloaded GGUF and
@@ -331,7 +342,9 @@ terminates it at exit; LM Studio is only the downloader) or **`lm-studio`** (LM 
 
 With both engines on `llama-server` the whole stack is ragx-managed: LM Studio downloads the
 GGUFs, ragx spawns and reaps the servers, and neither LM Studio nor huggingface.co is needed
-at query time. Under 8 GB RAM the embedding tier drops to `fast`; on macOS
+at query time. Under 8 GB RAM the recommended default moves to `fast`: interactively, picking
+a heavier tier asks for confirmation and then **honors your choice**; non-interactive runs
+(`--yes`/piped) auto-downgrade to `fast` with a note, since there is nobody to ask. On macOS
 `lms get --yes` picks MLX variants where LM Studio's catalog offers them. Switching the
 embedding model invalidates the index — the command tells you to run `ragx-cli index --full`.
 `init` offers this flow as its final step; rerun `ragx-cli models` anytime to switch.
