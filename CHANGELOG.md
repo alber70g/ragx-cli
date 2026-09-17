@@ -4,6 +4,40 @@ All notable changes to `ragx-cli` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-09-17
+
+### Added
+
+- **`ragx-cli doctor`**: runs the configured providers for real — embeds a probe string,
+  scores a probe pair with the reranker, and checks the index manifest and corpus drift —
+  then reports every stage with an actionable hint. Starts whatever ragx manages, exactly
+  as `index`/`query` would. Exit `0` healthy, `1` a check failed, `2` doctor could not run
+  (no corpus, unreadable config); warnings (no index yet, drift, a model the server does
+  not list but may JIT-load) do not fail the run. `--json` emits `ragx.doctor.v1` with a
+  `status`/`detail`/`hint`/`elapsed_ms` entry per check.
+- **LM Studio autostart**: with `provider = "openai"` and a local `base_url`, `index`,
+  `query`, and `doctor` now run `lms server start` and `lms load <model>` before their
+  first request, so a cold machine needs no manual setup. ragx already spawned the
+  `llama-server` engines; LM Studio is an app ragx hands off to, so it is started but
+  never stopped. Only local URLs are touched (a cloud endpoint, including one set via
+  `OPENAI_BASE_URL`, is never started), an already-running server is left alone, and a
+  model that is not downloaded fails loud naming the models the machine does have.
+  Opt out with `embeddings.autostart` / `expansion.autostart` (default `true`, settable
+  machine-wide via `ragx-cli config set --global`).
+
+### Fixed
+
+- **`llama-server` returned 500 on every real query.** The server was spawned without
+  `-b`/`-ub`/`-c`, leaving llama.cpp's default 512-token physical batch in place; a rerank
+  or embedding input is non-causal and cannot be split across ubatches, so ragx's
+  ~800-token chunks overflowed it ("input is too large to process"). Two-document smoke
+  tests passed, which is why it went unnoticed. Now spawned with
+  `--parallel 1 -c 0 -b 8192 -ub 8192` — one slot with the model's full trained context.
+  Fixes the `llama-server` embedding engine at default chunk size as well as rerank.
+- **`ragx-cli models --quality balanced` could not download BGE-M3.** `gaianet/bge-m3-GGUF`
+  now answers 401 from the Hugging Face API; both refs point at `gpustack/bge-m3-GGUF@Q8_0`
+  (same model, already the catalog's reranker source, pinned to the benchmarked quant).
+
 ## [0.6.0] — 2026-07-15
 
 ### Changed
