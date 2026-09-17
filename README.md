@@ -25,6 +25,7 @@ ragx-cli index                 # chunk -> embed -> HNSW + kNN similarity graph (
 ragx-cli query "why did we switch build tools?" --json --files-only
 ragx-cli index --full          # full rebuild: re-chunk + re-embed everything
 ragx-cli models                # recommend + download an embedding/reranker combo via LM Studio
+ragx-cli doctor                # check the configured providers start and answer, and the index matches
 ragx-cli --version             # version, repo, and the effective models (corpus config + ~/.ragxrc overrides)
 ```
 
@@ -42,6 +43,7 @@ your files (gitignore it) — like `.git/`, delete `.ragx/` and the corpus is un
   - [Does it actually help? (benchmarks)](#does-it-actually-help-benchmarks)
     - [Parameter study: what each knob actually does (2026-07)](#parameter-study-what-each-knob-actually-does-2026-07)
     - [BGE-M3 embedding study (2026-07-12)](#bge-m3-embedding-study-2026-07-12)
+  - [Checking your setup: `ragx-cli doctor`](#checking-your-setup-ragx-cli-doctor)
   - [Agent-first conventions](#agent-first-conventions)
   - [Using ragx-cli from a coding agent (CLAUDE.md / AGENTS.md)](#using-ragx-cli-from-a-coding-agent-claudemd--agentsmd)
     - [Pointing ragx-cli at your LLM — local or online](#pointing-ragx-cli-at-your-llm--local-or-online)
@@ -353,16 +355,66 @@ Why not `jina-embeddings-v5-text-nano`? Excellent model, but its EuroBERT archit
 Jina's llama.cpp fork — stock LM Studio can't load it (and the license is CC-BY-NC). See
 `research/lm-studio-model-download-api-and-curated-embedding-reranker-catalog-for-ragx-models-command.md`.
 
+## Checking your setup: `ragx-cli doctor`
+
+`ragx-cli doctor` runs the configured pipeline's providers for real — it embeds a probe string,
+scores a probe pair with the reranker, and checks the index on disk against the config — then
+reports each stage:
+
+```
+✓ config      /corpus/ragx.toml — embeddings=openai/text-embedding-bge-m3 · expansion=openai/qwen3.5-9b · rerank=sentence-transformers/BAAI/bge-reranker-v2-m3
+✗ embeddings  request to http://localhost:1234/v1/embeddings failed after 3 attempts: [Errno 61] Connection refused
+  → ragx does not start this server — launch it at http://localhost:1234/v1 (LM Studio: `lms server start`),
+    or hand the process to ragx with `ragx-cli models --embed-engine llama-server`
+✗ expansion   no server answered at http://localhost:1234/v1/models
+  → turn it off with `ragx-cli config set expansion.enabled false`
+✓ rerank      sentence-transformers/BAAI/bge-reranker-v2-m3 scored a probe pair (-8.14, 4.72)  3.1s
+✓ index       634 files, 1247 chunks, built with 'text-embedding-bge-m3', no drift
+```
+
+Exit codes: `0` healthy, `1` at least one check failed, `2` doctor itself could not run (no
+corpus, unreadable config). Warnings (no index yet, corpus drift, a model the server does not
+list but may JIT-load) do not fail the run. `--json` emits a `ragx.doctor.v1` document with a
+`status`/`detail`/`hint`/`elapsed_ms` entry per check.
+
+**Which servers does ragx start?** All of the local ones:
+
+| engine (`ragx-cli models`) | config | lifecycle |
+| --- | --- | --- |
+| `llama-server` | `provider="llama-server"` (embeddings and/or rerank) | spawned on demand from the configured GGUF and **killed at exit** — ragx owns the process |
+| `lm-studio` | `embeddings.provider="openai"` + a local `base_url` | `lms server start` + `lms load <model>` when nothing answers — LM Studio **keeps running** afterwards (it is an app, not ragx's child) |
+| `sentence-transformers` | `rerank.provider="sentence-transformers"` | in-process, no server |
+
+`index`, `query`, and `doctor` all do this before their first request, so a cold machine needs
+no manual setup. What was started is logged to stderr and shown in doctor's report:
+
+```
+✓ embeddings  started the LM Studio server on port 1234; loaded 'text-embedding-nomic-embed-text-v1.5' into LM Studio — openai/text-embedding-nomic-embed-text-v1.5 answered, dim=768  14.8s
+```
+
+Rules it follows: only a **local** `base_url` is ever touched (a cloud endpoint, including one
+set via `OPENAI_BASE_URL`, is never ragx's to start); an already-running server is left alone,
+and if LM Studio isn't installed but something else answers on that port, ragx just uses it; a
+model that isn't downloaded fails loud naming the models the machine does have. Turn it off per
+section with `ragx-cli config set embeddings.autostart false` (or machine-wide via
+`--global`) — then ragx only ever talks to servers you started.
+
+`ragx-cli models` still only downloads models and writes `ragx.toml`; it never launches
+anything. If a run dies with "connection refused", `doctor` names the stage and the fix.
+
 ## Agent-first conventions
 
 - `--json` emits exactly one JSON document on stdout (versioned schemas: `ragx.query.v1`,
-  `ragx.files.v1`, `ragx.status.v1`, `ragx.eval.v1`, `ragx.inspect.*.v1`); logs go to stderr.
+  `ragx.files.v1`, `ragx.status.v1`, `ragx.doctor.v1`, `ragx.eval.v1`, `ragx.inspect.*.v1`); logs go
+  to stderr.
 - Exit codes: `0` results, `1` success-but-empty, `2` error.
 - Every chunk carries `file`, `line_start/line_end`, `byte_start/byte_end` — agents jump to the
   exact source location and read the full text themselves (JSON chunk text is truncated).
 - `--files-only` aggregates chunk scores per file (sum of top-3) — the mode coding agents use most.
 - `ragx-cli status` includes a `drift` object (`new`/`changed`/`deleted` file counts vs the index) —
   agents check it to decide whether to run `ragx-cli index` before querying.
+- `ragx-cli doctor --json` verifies the providers answer before a batch of queries (`ok: false`
+  plus a per-check `hint` when something is down); exit `1` = a check failed.
 - `ragx-cli query -` reads the query from stdin; `ragx-cli inspect chunk|file|neighbors|communities|community`
   debugs the graph.
 
@@ -541,8 +593,8 @@ below — Enter accepts them all. With piped stdin (agents), `--yes`, or
 | `[communities]` | `resolution=1.0`, `seed=42` — recomputed every index run; changing these never invalidates the index |
 | `[fusion]` | `rrf_k=60`, `per_query_top=20` |
 | `[scoring]` | `alpha_rerank=0.6`, `beta_heat=0.25`, `gamma_vector=0.15` |
-| `[embeddings]` | `provider="openai"`, `base_url="http://localhost:1234/v1"`, prefixes for nomic-style models, `api_key_env=""` |
-| `[expansion]` | optional LLM for multi-query/HyDE; reasoning models supported (4096-token budget); `api_key_env=""` |
+| `[embeddings]` | `provider="openai"`, `base_url="http://localhost:1234/v1"`, prefixes for nomic-style models, `api_key_env=""`, `autostart=true` (start LM Studio + load the model when the URL is local) |
+| `[expansion]` | optional LLM for multi-query/HyDE; reasoning models supported (4096-token budget); `api_key_env=""`, `autostart=true` |
 | `[rerank]` | `BAAI/bge-reranker-v2-m3` via sentence-transformers (`uv tool install 'ragx-cli[rerank]'`) |
 
 ## Features & roadmap

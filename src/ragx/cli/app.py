@@ -32,12 +32,13 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 config_app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(config_app, name="config")
 
-from ragx.cli import eval_cmd, inspect_cmd, models_cmd, pipeline  # noqa: E402  (needs `app` defined above)
+from ragx.cli import doctor_cmd, eval_cmd, inspect_cmd, models_cmd, pipeline  # noqa: E402  (needs `app` defined above)
 
 pipeline.register(app)
 inspect_cmd.register(app)
 eval_cmd.register(app)
 models_cmd.register(app)
+doctor_cmd.register(app)
 
 
 def _print_version() -> None:
@@ -225,4 +226,5 @@ def config_set(
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(levelname)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # one INFO line per embedding batch
     app()

@@ -27,6 +27,11 @@ API contracts for every core module. Deferred feature specs live in `docs/`.
   with the llama-server rerank engine, LM Studio is downloader-only at query time.
   Env fallbacks: `OPENAI_BASE_URL` (only while base_url is still the default) and
   `OPENAI_API_KEY` (only when `api_key_env` is unset); explicit config always wins.
+  With `provider="openai"` and a LOCAL base_url, `index`/`query`/`doctor` autostart LM
+  Studio first (`providers/lmstudio_process.py`: `lms server start` + `lms load` when the
+  model isn't in `lms ps`; never stops it — it's an app, not our child). Remote URLs and
+  `<section>.autostart=false` skip it. Tests are disarmed by an autouse conftest fixture
+  that stubs `ensure_for_section` — never let a test reach the real `lms`.
 - Machine-level provider settings live in `~/.ragxrc` (TOML; ONLY the embeddings/
   expansion/rerank sections, unknown keys fail loud). Precedence: DEFAULTS < corpus
   ragx.toml < ~/.ragxrc — the rc OVERRIDES corpus values and logs a stderr warning
@@ -63,17 +68,20 @@ src/ragx/
     indexer.py     #   run_index: discover->hash->chunk->embed->HNSW+store->kNN edges
     query.py       #   run_query: expansion->fan-out->RRF->traversal->rerank->combine; JSON serializers
     eval.py        #   recall@5/@10 + MRR over file-level ranking, injected query_fn
+    doctor.py      #   run_doctor: config/embeddings/expansion/rerank/index health checks
+                   #   (injected provider factories; backends get started here too)
     catalog.py     #   curated embedding/reranker catalog (tiers, prefixes) + spec detect
     lmstudio.py    #   `lms` CLI wrapper: find/download (`lms get --yes`)/`lms ls --json`;
                    #   LM Studio can't download plain safetensors — rerankers stay on HF
   providers/       # base.py protocols (Embedder/Generator/Reranker); openai_compat.py;
-                   # st_reranker.py; llama_process.py (managed llama-server lifecycle) +
+                   # st_reranker.py; lmstudio_process.py (LM Studio autostart);
+                   # llama_process.py (managed llama-server lifecycle) +
                    # llama_server.py (rerank) + llama_embedder.py (embeddings);
                    # registry.py factories (env-var + api_key_env resolution)
   cli/             # thin shells only: app.py (init/status/config + registration),
                    # pipeline.py (index/query), inspect_cmd.py, eval_cmd.py, models_cmd.py
-                   # (recommend/download/configure models), output.py
-tests/             # 177 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
+                   # (recommend/download/configure models), doctor_cmd.py, output.py
+tests/             # 244 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
 ```
 
 ## Flows
@@ -158,7 +166,7 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 
 ## Dev loop
 
-`uv sync --group dev --extra rerank` · `uv run pytest -q` (177 pass, ~5 s) ·
+`uv sync --group dev --extra rerank` · `uv run pytest -q` (244 pass, ~5 s) ·
 `uv run ruff check src tests` · file soft cap ~150 lines · expected failures raise `RagxError`
 (CLI maps to exit 2). Live smoke: LM Studio must be running with the configured embedding model.
 Changes that impact usage (CLI flags, config keys/precedence, output schemas, install steps)

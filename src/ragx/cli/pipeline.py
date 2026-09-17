@@ -12,6 +12,7 @@ from ragx.core.config import Config, require_root
 from ragx.core.errors import RagxError
 from ragx.core.indexer import run_index
 from ragx.core.query import QueryOptions, run_query, to_files_json, to_query_json
+from ragx.providers import lmstudio_process
 from ragx.providers.registry import make_embedder, make_generator, make_reranker
 
 
@@ -36,6 +37,7 @@ def index(
     try:
         root = require_root(path)
         cfg = Config.load(root, confirm=migrate_confirm())
+        lmstudio_process.ensure_for_section(cfg, "embeddings")
         stats = run_index(root, cfg, make_embedder(cfg), full=full)
     except RagxError as exc:
         fail(str(exc))
@@ -48,6 +50,16 @@ def index(
             f"deleted {stats.files_deleted} ({stats.chunks_deleted} chunks), "
             f"unchanged {stats.files_unchanged}"
         )
+
+
+def _generator(cfg: Config):
+    """Expansion is optional: a backend that won't come up must not sink the query —
+    expand_query degrades to a no-op on any failure."""
+    try:
+        lmstudio_process.ensure_for_section(cfg, "expansion")
+    except RagxError as exc:
+        print(f"warning: query expansion backend unavailable: {exc}", file=sys.stderr)
+    return make_generator(cfg)
 
 
 def query(
@@ -67,6 +79,7 @@ def query(
     try:
         root = require_root()
         cfg = Config.load(root, confirm=migrate_confirm())
+        lmstudio_process.ensure_for_section(cfg, "embeddings")
         opts = QueryOptions(
             top=top if top is not None else cfg.get("query.top"),
             files_only=files_only,
@@ -78,7 +91,7 @@ def query(
         )
         out = run_query(
             root, cfg, make_embedder(cfg), text, opts,
-            generator=make_generator(cfg) if opts.expand else None,
+            generator=_generator(cfg) if opts.expand else None,
             reranker=make_reranker(cfg) if opts.rerank else None,
         )
     except RagxError as exc:

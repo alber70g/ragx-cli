@@ -5,6 +5,7 @@ The rc overrides corpus values — with a warning."""
 from __future__ import annotations
 
 import logging
+import os
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -46,6 +47,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "query_prefix": "search_query: ",
         "batch_size": 32,
         "api_key_env": "",  # NAME of an env var holding the API key; empty = no auth header
+        "autostart": True,  # provider="openai" + local base_url: start LM Studio and load the model
         "gguf": "",  # llama-server only: path to the embedding GGUF (LM Studio dir works)
         "server_bin": "llama-server",  # llama-server only: binary name or path
     },
@@ -57,6 +59,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "variants": 3,
         "hyde": True,
         "api_key_env": "",
+        "autostart": True,  # see embeddings.autostart
     },
     "rerank": {
         "enabled": True,
@@ -141,6 +144,20 @@ def _coerce(section: str, key: str, value: Any) -> Any:
     if isinstance(current, list) and isinstance(value, str):
         return [v.strip() for v in value.split(",") if v.strip()]
     return value
+
+
+DEFAULT_OPENAI_BASE_URL = DEFAULTS["embeddings"]["base_url"]  # the LM Studio default
+
+
+def effective_base_url(cfg: "Config", section: str) -> str:
+    """The URL a provider section actually talks to: `<section>.base_url`, unless it is
+    still the built-in default and OPENAI_BASE_URL is set — an explicit `config set`
+    always wins. Providers and the LM Studio autostart must agree on this."""
+    base_url = cfg.get(f"{section}.base_url")
+    env_url = os.environ.get("OPENAI_BASE_URL")
+    if env_url and base_url == DEFAULT_OPENAI_BASE_URL:
+        return env_url.rstrip("/")
+    return base_url
 
 
 def load_rc(rc: Path | None = None) -> dict[str, dict[str, Any]]:

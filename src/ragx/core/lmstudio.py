@@ -81,18 +81,11 @@ def find_installed(lms: str, repo_fragment: str) -> InstalledModel | None:
     return None
 
 
-def download(lms: str, ref: str) -> None:
-    """Run `lms get <ref> --yes`, streaming its progress output to stderr.
-
-    `ref` is a catalog id (`google/embedding-gemma-300m`), a search term, or a full
-    Hugging Face URL. Raises RagxError with lms's final message on failure.
-    """
-    proc = subprocess.Popen(
-        [lms, "get", ref, "--yes"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+def _stream(cmd: list[str], what: str) -> None:
+    """Run `cmd`, streaming its progress output to stderr. Raises RagxError with lms's
+    final message on failure (downloads and model loads both take a while and both
+    print progress worth showing)."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     tail = ""
     stream = proc.stdout
     assert stream is not None
@@ -103,4 +96,47 @@ def download(lms: str, ref: str) -> None:
         if cleaned:
             tail = cleaned.splitlines()[-1]
     if proc.wait() != 0:
-        raise RagxError(f"`lms get {ref}` failed: {tail or 'see output above'}")
+        raise RagxError(f"{what} failed: {tail or 'see output above'}")
+
+
+def download(lms: str, ref: str) -> None:
+    """Run `lms get <ref> --yes`.
+
+    `ref` is a catalog id (`google/embedding-gemma-300m`), a search term, or a full
+    Hugging Face URL.
+    """
+    _stream([lms, "get", ref, "--yes"], f"`lms get {ref}`")
+
+
+def start_server(lms: str, port: int) -> None:
+    """`lms server start --port <port>`. LM Studio's server outlives ragx — unlike the
+    llama-server engines, we hand off to it and never shut it down."""
+    proc = subprocess.run(
+        [lms, "server", "start", "--port", str(port)], capture_output=True, text=True, timeout=120
+    )
+    if proc.returncode != 0:
+        detail = _ANSI.sub("", (proc.stderr or proc.stdout).strip())
+        raise RagxError(f"`lms server start --port {port}` failed: {detail}")
+
+
+def loaded_identities(lms: str) -> list[str]:
+    """Identity strings (identifier / model key / path) of the models currently in memory."""
+    proc = subprocess.run([lms, "ps", "--json"], capture_output=True, text=True, timeout=30)
+    if proc.returncode != 0:
+        detail = _ANSI.sub("", (proc.stderr or proc.stdout).strip())
+        raise RagxError(f"`lms ps --json` failed: {detail}")
+    try:
+        entries = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise RagxError(f"`lms ps --json` returned invalid JSON: {exc}") from exc
+    out: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        out.extend(str(entry[k]) for k in ("identifier", "modelKey", "path") if entry.get(k))
+    return out
+
+
+def load_model(lms: str, model_key: str) -> None:
+    """`lms load <model_key> -y` — fails loud when the model is not downloaded."""
+    _stream([lms, "load", model_key, "-y"], f"`lms load {model_key}`")

@@ -5,16 +5,16 @@ from __future__ import annotations
 import os
 import sys
 
-from ragx.core.config import Config
+from ragx.core.config import DEFAULT_OPENAI_BASE_URL, Config, effective_base_url
 from ragx.core.errors import RagxError
 from ragx.providers.base import Embedder, Generator, Reranker
 from ragx.providers.openai_compat import OpenAICompatEmbedder, OpenAICompatGenerator
 from ragx.providers.st_reranker import STReranker
 
 _OLLAMA_BASE_URL = "http://localhost:11434/v1"
-# DEFAULTS["embeddings"]["base_url"] — the LM Studio default; if a user switches to the
-# "ollama" provider without also overriding base_url, we swap in the ollama default instead.
-_DEFAULT_OPENAI_BASE_URL = "http://localhost:1234/v1"
+# if a user switches to the "ollama" provider without also overriding base_url, we swap
+# in the ollama default instead of leaving them pointed at LM Studio's port.
+_DEFAULT_OPENAI_BASE_URL = DEFAULT_OPENAI_BASE_URL
 
 
 def _resolve_api_key(cfg: Config, section: str) -> str | None:
@@ -29,16 +29,6 @@ def _resolve_api_key(cfg: Config, section: str) -> str | None:
             )
         return key
     return os.environ.get("OPENAI_API_KEY") or None
-
-
-def _resolve_base_url(cfg: Config, section: str) -> str:
-    """Honor the conventional OPENAI_BASE_URL env var, but only while `<section>.base_url`
-    is still the built-in default — an explicit `ragx-cli config set` always wins."""
-    base_url = cfg.get(f"{section}.base_url")
-    env_url = os.environ.get("OPENAI_BASE_URL")
-    if env_url and base_url == _DEFAULT_OPENAI_BASE_URL:
-        return env_url.rstrip("/")
-    return base_url
 
 
 _LLAMA_EMBED_BASE_URL = "http://127.0.0.1:9813/v1"  # rerank's llama-server sits on 9814
@@ -62,7 +52,7 @@ def make_embedder(cfg: Config) -> Embedder:
             server_bin=cfg.get("embeddings.server_bin"),
         )
     if provider == "openai":
-        base_url = _resolve_base_url(cfg, "embeddings")
+        base_url = effective_base_url(cfg, "embeddings")
     elif provider == "ollama":
         if base_url == _DEFAULT_OPENAI_BASE_URL:
             base_url = _OLLAMA_BASE_URL
@@ -82,13 +72,15 @@ def make_generator(cfg: Config) -> Generator | None:
     if not cfg.get("expansion.enabled"):
         return None
     return OpenAICompatGenerator(
-        base_url=_resolve_base_url(cfg, "expansion"),
+        base_url=effective_base_url(cfg, "expansion"),
         model=cfg.get("expansion.model"),
         api_key=_resolve_api_key(cfg, "expansion"),
     )
 
 
-def make_reranker(cfg: Config) -> Reranker | None:
+def make_reranker(cfg: Config, *, strict: bool = False) -> Reranker | None:
+    """Build the configured reranker. Query-time callers degrade to no-rerank on failure;
+    `strict=True` (doctor) re-raises so the real error can be reported."""
     if not cfg.get("rerank.enabled"):
         return None
     provider = cfg.get("rerank.provider")
@@ -105,5 +97,7 @@ def make_reranker(cfg: Config) -> Reranker | None:
             raise RagxError(f"unknown rerank provider: {provider!r}")
         return STReranker(model=cfg.get("rerank.model"))
     except RagxError as exc:
+        if strict:
+            raise
         print(f"warning: reranker unavailable: {exc}", file=sys.stderr)
         return None
