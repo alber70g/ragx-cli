@@ -12,6 +12,7 @@ import respx
 from ragx.core.config import Config, write_default_config
 from ragx.core.errors import RagxError
 from ragx.providers.llama_embedder import LlamaServerEmbedder
+from ragx.providers.llama_process import MAX_BATCH_TOKENS, LlamaServerProcess
 from ragx.providers.llama_server import LlamaServerReranker
 from ragx.providers.registry import make_embedder, make_reranker
 
@@ -133,3 +134,45 @@ def test_registry_swaps_default_base_url_for_llama_embedder(tmp_path):
     emb = make_embedder(cfg)
     assert isinstance(emb, LlamaServerEmbedder)
     assert emb._proc.root_url == EMBED_BASE
+
+
+def test_spawn_passes_a_batch_large_enough_for_real_chunks(tmp_path, monkeypatch):
+    """Regression: llama.cpp's default 512-token physical batch cannot hold a ~800-token
+    chunk, and a non-causal rerank/embedding input cannot be split across ubatches — the
+    server answers 500 on every real query without these flags."""
+    gguf = tmp_path / "model.gguf"
+    gguf.write_bytes(b"x")
+    recorded: dict = {}
+
+    class FakeProc:
+        """Alive until terminated — _spawn treats an exited process as a load failure."""
+
+        def __init__(self):
+            self.rc = None
+
+        def poll(self):
+            return self.rc
+
+        def terminate(self):
+            self.rc = 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(cmd, **kwargs):
+        recorded["cmd"] = cmd
+        return FakeProc()
+
+    monkeypatch.setattr("shutil.which", lambda _: "/fake/llama-server")
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    proc = LlamaServerProcess(
+        "http://127.0.0.1:9814", str(gguf), "llama-server", mode="--rerank", section="rerank"
+    )
+    monkeypatch.setattr(proc, "healthy", lambda: True)  # "came up" right after spawn
+    proc._spawn()
+
+    cmd = recorded["cmd"]
+    batch = str(MAX_BATCH_TOKENS)
+    assert MAX_BATCH_TOKENS >= 2048  # a chunk plus its query must fit in one ubatch
+    for flag, value in (("-b", batch), ("-ub", batch), ("-c", "0"), ("--parallel", "1")):
+        assert cmd[cmd.index(flag) + 1] == value, f"{flag} missing or wrong: {cmd}"

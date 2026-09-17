@@ -19,6 +19,12 @@ import httpx
 from ragx.core.errors import RagxError
 
 HEALTH_TIMEOUT_S = 120
+# llama.cpp's default physical batch is 512 tokens, and a rerank/embedding input is
+# non-causal: it cannot be split across ubatches. ragx's ~800-token chunks overflow that
+# default and the server answers 500 ("input is too large to process"). One slot gets the
+# model's full trained context (-c 0) and a batch sized to match; llama.cpp tolerates the
+# batch exceeding a smaller model's context (verified against a 512-token context).
+MAX_BATCH_TOKENS = 8192
 UPGRADE_HINT = "your llama.cpp is too old for this model architecture — upgrade it (e.g. `brew upgrade llama.cpp`)"
 
 
@@ -79,7 +85,12 @@ class LlamaServerProcess:
             mode="w+", prefix="ragx-llama-server-", suffix=".log", delete=False
         )
         self._proc = subprocess.Popen(
-            [binary, "-m", str(self.gguf), self._mode, "--host", "127.0.0.1", "--port", str(port)],
+            [
+                binary, "-m", str(self.gguf), self._mode,
+                "--host", "127.0.0.1", "--port", str(port),
+                "--parallel", "1", "-c", "0",
+                "-b", str(MAX_BATCH_TOKENS), "-ub", str(MAX_BATCH_TOKENS),
+            ],
             stdout=log,
             stderr=subprocess.STDOUT,
         )

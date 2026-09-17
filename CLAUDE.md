@@ -140,6 +140,10 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 
 ## Gotchas
 
+- llama-server spawns MUST pass `--parallel 1 -c 0 -b/-ub 8192` (`llama_process.py`):
+  llama.cpp's default 512-token physical batch cannot hold a ~800-token chunk, and a
+  non-causal rerank/embedding input can't split across ubatches — without them every real
+  query 500s ("input is too large to process") while a 2-doc smoke test passes.
 - Reasoning models as expansion LLM: answers land in `content` only after thinking;
   expansion uses max_tokens=4096 to leave room for that. Don't lower it.
 - Changing `embeddings.model` invalidates the index; run_query fails loud on manifest
