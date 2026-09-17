@@ -64,7 +64,7 @@ LS_JSON = json.dumps(
             "modelKey": "text-embedding-bge-m3",
             "type": "embedding",
             "format": "gguf",
-            "path": "gaianet/bge-m3-GGUF/bge-m3-Q8_0.gguf",
+            "path": "gpustack/bge-m3-GGUF/bge-m3-Q8_0.gguf",
             "sizeBytes": 600000000,
         },
         {"modelKey": "qwen3.5-9b", "type": "llm", "format": "gguf", "path": "q/q.gguf"},
@@ -139,7 +139,7 @@ def test_models_fails_without_lms(corpus, monkeypatch):
 def test_models_downloads_and_updates_config(corpus, monkeypatch):
     installed = lmstudio.InstalledModel(
         model_key="text-embedding-bge-m3", type="embedding", format="gguf",
-        path="gaianet/bge-m3-GGUF/x.gguf", size_bytes=1,
+        path="gpustack/bge-m3-GGUF/x.gguf", size_bytes=1,
     )
     calls = {"download": 0, "lookups": 0}
 
@@ -211,7 +211,7 @@ def test_models_dry_run_touches_nothing(corpus, monkeypatch):
 def test_models_llama_engine_writes_gguf_config(corpus, monkeypatch, tmp_path):
     embedding = lmstudio.InstalledModel(
         model_key="text-embedding-bge-m3", type="embedding", format="gguf",
-        path="gaianet/bge-m3-GGUF/x.gguf", size_bytes=1,
+        path="gpustack/bge-m3-GGUF/x.gguf", size_bytes=1,
     )
     gguf = lmstudio.InstalledModel(
         model_key="bge-reranker-v2-m3", type="llm", format="gguf",
@@ -245,7 +245,7 @@ def test_models_all_llama_engines(corpus, monkeypatch, tmp_path):
     """--embed-engine + --rerank-engine llama-server: LM Studio is a downloader only."""
     emb_gguf = lmstudio.InstalledModel(
         model_key="bge-m3-q8", type="embedding", format="gguf",
-        path="gaianet/bge-m3-GGUF/bge-m3-Q8_0.gguf", size_bytes=1,
+        path="gpustack/bge-m3-GGUF/bge-m3-Q8_0.gguf", size_bytes=1,
     )
     rr_gguf = lmstudio.InstalledModel(
         model_key="bge-reranker-v2-m3", type="llm", format="gguf",
@@ -373,7 +373,7 @@ def test_models_interactive_flow_plans_then_writes(corpus, monkeypatch, capsys):
 
     installed = lmstudio.InstalledModel(
         model_key="text-embedding-bge-m3", type="embedding", format="gguf",
-        path="gaianet/bge-m3-GGUF/x.gguf", size_bytes=1,
+        path="gpustack/bge-m3-GGUF/x.gguf", size_bytes=1,
     )
     monkeypatch.setattr("ragx.cli.models_cmd.detect_specs", lambda: SpecsCls(32.0, True))
     monkeypatch.setattr("shutil.which", lambda name: None)

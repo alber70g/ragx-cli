@@ -75,7 +75,7 @@ EMBEDDINGS: dict[str, EmbeddingChoice] = {
     "balanced": EmbeddingChoice(
         tier="balanced",
         label="BGE-M3",
-        ref="https://huggingface.co/gaianet/bge-m3-GGUF",
+        ref="https://huggingface.co/gpustack/bge-m3-GGUF@Q8_0",
         repo_fragment="bge-m3",
         doc_prefix="",
         query_prefix="",
@@ -84,7 +84,7 @@ EMBEDDINGS: dict[str, EmbeddingChoice] = {
         context="8K",
         download_mb=600,
         notes="ragx's benchmarked production model",
-        gguf_ref="https://huggingface.co/gaianet/bge-m3-GGUF",
+        gguf_ref="https://huggingface.co/gpustack/bge-m3-GGUF@Q8_0",
         gguf_fragment="bge-m3",
     ),
     "best": EmbeddingChoice(
