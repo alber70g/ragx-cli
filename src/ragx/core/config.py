@@ -74,7 +74,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "gguf": "",  # llama-server only: path to the reranker GGUF (LM Studio dir works)
         "server_bin": "llama-server",  # llama-server only: binary name or path
     },
-    "query": {"top": 8, "max_chunk_chars": 1200},
+    "query": {"top": 20, "max_chunk_chars": 1200},  # top = result entries (one per file)
 }
 
 

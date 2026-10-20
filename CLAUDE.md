@@ -81,7 +81,7 @@ src/ragx/
   cli/             # thin shells only: app.py (init/status/config + registration),
                    # pipeline.py (index/query), inspect_cmd.py, eval_cmd.py, models_cmd.py
                    # (recommend/download/configure models), doctor_cmd.py, output.py
-tests/             # 249 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
+tests/             # 253 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
 ```
 
 ## Flows
@@ -119,8 +119,11 @@ frontier ≤ 150) → cross-encoder rerank of top-100 shortlist → final =
 0.6·rerank + 0.25·heat + 0.15·vector (each min-max normalized; weights renormalize when a
 stage is off). Since 0.8.0 expansion and rerank are OPT-IN (`--expand`/`--rerank`;
 `QueryOptions` defaults expand=False, rerank=False; `--no-expand/--no-rerank` are hidden
-deprecated no-ops); graph stays on, `--no-graph` skips it; `--files-only` ranks files
-by sum of top-3 chunk scores; `--explain` attaches seed→parent→edge_weight→hop traces.
+deprecated no-ops); graph stays on, `--no-graph` skips it. Output is folded per file
+(`core/grouping.py`, schema `ragx.query.v2`): walk ranked chunks until `top` (default 20)
+distinct files are seen, each file keeps its ≤3 chunks inside that window, entry score = their
+sum. The window is load-bearing — summing ALL candidates let weak graph-neighbour chunks pad
+files (graph MRR .43 → .38; windowed .65). `--files-only` = same entries, no text; `--explain` attaches seed→parent→edge_weight→hop traces.
 
 ## State & benchmarks (as of 2026-07-10)
 
@@ -174,7 +177,7 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 
 ## Dev loop
 
-`uv sync --group dev --extra rerank` · `uv run pytest -q` (249 pass, ~5 s) ·
+`uv sync --group dev --extra rerank` · `uv run pytest -q` (253 pass, ~5 s) ·
 `uv run ruff check src tests` · file soft cap ~150 lines · expected failures raise `RagxError`
 (CLI maps to exit 2). Live smoke: LM Studio must be running with the configured embedding model.
 Changes that impact usage (CLI flags, config keys/precedence, output schemas, install steps)

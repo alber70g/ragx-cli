@@ -21,6 +21,16 @@ All notable changes to `ragx-cli` are documented here. The format follows
   `target/`, `coverage/`, `vendor/`. Applies to new `ragx-cli init` configs; an existing
   `ragx.toml` keeps its lists.
 
+- **Query results are one entry per file (`ragx.query.v2`, breaking).** A file whose
+  chunks would appear several times in the ranked list becomes one entry with up to 3
+  sub-entries; its score is their sum, so it ranks higher. Only chunks within the visible
+  window (ranked chunks until `--top` distinct files are seen) count. JSON results are
+  `{file, score, chunks: [...]}`; chunks no longer repeat `file`. `--files-only`
+  (`ragx.files.v1`) keeps its shape and now returns the same entries. On the notes eval
+  corpus: baseline MRR .646 → .665, graph config r@5 .808 → .923 and MRR .432 → .653.
+- **`--top` counts result entries (files), default 20** (`query.top`, was 8 chunks).
+  Existing `ragx.toml` files keep their own `query.top`. `ragx-cli eval` no longer
+  over-fetches `top × 3` chunks.
 
 ### Added
 

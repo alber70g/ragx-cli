@@ -30,7 +30,7 @@ A corpus is ragx-indexed if its root has `ragx.toml` and `.ragx/`.
 ```bash
 ragx-cli status --json          # root, model, counts, and drift (new/changed/deleted vs index)
 ragx-cli query "question" --json --files-only   # which files are relevant — most-used mode
-ragx-cli query "..." --json --top 8             # ranked chunks with exact locations
+ragx-cli query "..." --json --top 10            # one entry per file, best chunks + exact locations
 ragx-cli query "..." --json --rerank            # higher precision: cross-encoder rerank (slower)
 echo "..." | ragx-cli query - --json            # long/multiline query from stdin
 ragx-cli index                  # incremental reindex (hash-based, cheap) — the default
@@ -43,13 +43,15 @@ by default).
 
 ## Output
 
-- stdout is exactly one JSON doc (`ragx.query.v1` / `ragx.files.v1` / `ragx.status.v1`); logs go
+- stdout is exactly one JSON doc (`ragx.query.v2` / `ragx.files.v1` / `ragx.status.v1`); logs go
   to stderr. Never parse stderr.
 - Exit codes: `0` results, `1` success-but-empty (report "nothing found", don't retry as failure),
   `2` error.
-- Chunk results carry `file`, `line_start/end`, `byte_start/end`, `score`, `breakdown`. JSON
-  `text` is truncated — read the file at the line range for full context.
-- Typical flow: `--files-only` to pick files → `--top 8` for locations → read files at ranges.
+- `ragx.query.v2` results are one entry per file (default 20): `file`, `score` (sum of its
+  chunks), `chunks` (up to 3, each with `line_start/end`, `byte_start/end`, `score`,
+  `breakdown`, `text`). JSON `text` is truncated — read the file at the line range for full
+  context.
+- Typical flow: `--files-only` to pick files → `--json` for line ranges → read files at ranges.
 
 ## Freshness
 

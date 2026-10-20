@@ -59,10 +59,8 @@ def eval_cmd(
             reranker=reranker if opts.rerank else None,
         )
 
-    # retrieve chunks deep enough that file-level ranking has >= `top` files to rank
-    selected = [
-        (name, replace(_BUILTIN_CONFIGS[name], top=top * 3)) for name in names
-    ]
+    # query results are already one entry per file, ranked
+    selected = [(name, replace(_BUILTIN_CONFIGS[name], top=top)) for name in names]
     result = evaluate(queries, selected, query_fn, top=top)
 
     if json_out:

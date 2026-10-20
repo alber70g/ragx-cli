@@ -64,7 +64,7 @@ def _generator(cfg: Config):
 
 def query(
     text: str = typer.Argument(..., help="query text, or '-' to read from stdin"),
-    top: int | None = typer.Option(None, "--top"),
+    top: int | None = typer.Option(None, "--top", help="result entries (files); default query.top = 20"),
     json_out: bool = typer.Option(False, "--json"),
     files_only: bool = typer.Option(False, "--files-only"),
     expand: bool = typer.Option(False, "--expand", help="LLM query expansion (multi-query + HyDE)"),
@@ -79,7 +79,7 @@ def query(
     hops: int | None = typer.Option(None, "--hops"),
     explain: bool = typer.Option(False, "--explain"),
 ) -> None:
-    """Search the index; ranked chunks (or files with --files-only)."""
+    """Search the index: one entry per file with its best chunks (paths only with --files-only)."""
     for flag, used in (("--no-expand", no_expand), ("--no-rerank", no_rerank)):
         if used:
             print(f"warning: {flag} is deprecated; that stage is now off by default", file=sys.stderr)
@@ -114,9 +114,11 @@ def query(
         for f in to_files_json(out)["files"]:
             typer.echo(f"{f['score']:.4f}  {f['file']}")
     else:
-        for r in out.results:
-            loc = f"{r.chunk.file_path}:{r.chunk.line_start}-{r.chunk.line_end}"
-            first_line = r.chunk.text.strip().splitlines()[0][:100] if r.chunk.text.strip() else ""
-            typer.echo(f"{r.score:.4f}  {loc}  {first_line}")
+        for f in out.results:
+            typer.echo(f"{f.score:.4f}  {f.file_path}")
+            for r in f.chunks:
+                lines = f"{r.chunk.line_start}-{r.chunk.line_end}"
+                first_line = r.chunk.text.strip().splitlines()[0][:90] if r.chunk.text.strip() else ""
+                typer.echo(f"        {r.score:.4f}  {lines:<9}  {first_line}")
     if not out.results:
         raise typer.Exit(code=1)

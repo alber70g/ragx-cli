@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from ragx.cli import eval_cmd as eval_cmd_mod
 from ragx.core.errors import RagxError
 from ragx.core.eval import evaluate, load_queries
+from ragx.core.grouping import group_by_file
 from ragx.core.models import Chunk, QueryOutput, ScoredChunk
 from ragx.core.query import QueryOptions
 
@@ -23,7 +24,8 @@ def _output(query: str, scored: list[tuple[str, float]]) -> QueryOutput:
     results = [
         ScoredChunk(chunk=_chunk(i, path), score=score) for i, (path, score) in enumerate(scored)
     ]
-    return QueryOutput(query=query, results=results)
+    results.sort(key=lambda r: -r.score)
+    return QueryOutput(query=query, results=group_by_file(results, top=len(results)))
 
 
 # ---------------------------------------------------------------------------

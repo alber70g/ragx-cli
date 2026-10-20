@@ -106,6 +106,13 @@ A default query runs vector search + graph traversal: no LLM call, no cross-enco
 Expansion (`--expand`) and rerank (`--rerank`) are opt-in; `--no-graph` skips traversal,
 which leaves pure vector search. Callers trade latency for quality per query.
 
+Results are **one entry per file**. The pipeline ranks chunks, walks that list until it has
+seen `--top` distinct files (default `query.top = 20`), and folds each file's chunks inside
+that window into one entry: up to 3 sub-entries, entry score = their sum. A file that would
+appear several times in a flat list therefore ranks higher. Chunks below the window never
+count, so graph traversal's weak neighbour chunks cannot pad a file (measured on the notes
+eval corpus: graph-config MRR .43 flat-list, .38 summing all chunks, .65 windowed).
+
 ```mermaid
 flowchart TD
     Q[query] --> X["1 · expansion (optional, one LLM call)<br/>2–4 reformulations + HyDE passage"]
@@ -117,7 +124,8 @@ flowchart TD
     H --> K["5 · cross-encoder rerank (--rerank)<br/>(query, chunk) pairs, capped shortlist"]
     H -. "default (no --rerank)" .-> F
     K --> F["6 · combined score<br/>α·rerank + β·heat + γ·vector"]
-    F --> O["ranked chunks (or files via --files-only)<br/>+ --explain traversal trace"]
+    F --> G["7 · fold per file<br/>a file's best ≤3 chunks → one entry, score = their sum"]
+    G --> O["top 20 entries (or paths via --files-only)<br/>+ --explain traversal trace"]
 ```
 
 **Heat propagation** is what sets ragx-cli apart from plain RAG: seed chunks (from vector search)
@@ -408,13 +416,16 @@ anything. If a run dies with "connection refused", `doctor` names the stage and 
 
 ## Agent-first conventions
 
-- `--json` emits exactly one JSON document on stdout (versioned schemas: `ragx.query.v1`,
+- `--json` emits exactly one JSON document on stdout (versioned schemas: `ragx.query.v2`,
   `ragx.files.v1`, `ragx.status.v1`, `ragx.doctor.v1`, `ragx.eval.v1`, `ragx.inspect.*.v1`); logs go
   to stderr.
 - Exit codes: `0` results, `1` success-but-empty, `2` error.
-- Every chunk carries `file`, `line_start/line_end`, `byte_start/byte_end` — agents jump to the
-  exact source location and read the full text themselves (JSON chunk text is truncated).
-- `--files-only` aggregates chunk scores per file (sum of top-3) — the mode coding agents use most.
+- `ragx.query.v2` results are one entry per file: `{file, score, chunks: [...]}`. Each chunk
+  carries `chunk_id`, `line_start/line_end`, `byte_start/byte_end`, `score`, `breakdown`, `text`,
+  `truncated` — agents jump to the exact source location and read the full text themselves
+  (JSON chunk text is truncated). v1 (one flat entry per chunk) is gone since 0.8.0.
+- `--files-only` returns the same entries without text (`file`, `score`, `chunk_ids`) — the
+  mode coding agents use most.
 - `ragx-cli status` includes a `drift` object (`new`/`changed`/`deleted` file counts vs the index) —
   agents check it to decide whether to run `ragx-cli index` before querying.
 - `ragx-cli doctor --json` verifies the providers answer before a batch of queries (`ok: false`
@@ -434,9 +445,9 @@ This repo has a ragx-cli index (`.ragx/`). Prefer it over grep for "where is X d
 questions; fall back to grep for exact identifiers.
 
 - Find relevant files: `ragx-cli query "<natural-language question>" --json --files-only`
-- Get chunks with exact locations: `ragx-cli query "..." --json --top 8` — each result carries
-  `file` + `line_start/line_end`; the JSON `text` is truncated, so read the file yourself
-  for full context.
+- Get chunks with exact locations: `ragx-cli query "..." --json` — one result per `file`
+  (default 20, `--top N`), each with up to 3 `chunks` carrying `line_start/line_end`; the JSON
+  `text` is truncated, so read the file yourself for full context.
 - The default query makes no LLM call and loads no cross-encoder. For higher precision add
   `--rerank`; add `--expand` for an LLM query-expansion pass (one extra LLM call).
 - After adding or editing files: `ragx-cli index` (incremental and cheap — hash-based).

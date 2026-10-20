@@ -59,9 +59,18 @@ class ScoredChunk:
 
 
 @dataclass
+class ScoredFile:
+    """One result entry: a file's best chunks folded together, scored as their sum."""
+
+    file_path: str
+    score: float
+    chunks: list[ScoredChunk]  # best-first
+
+
+@dataclass
 class QueryOutput:
-    """Top-level result of the query pipeline; serialized as ragx.query.v1."""
+    """Top-level result of the query pipeline; serialized as ragx.query.v2."""
 
     query: str
     variants: list[str] = field(default_factory=list)
-    results: list[ScoredChunk] = field(default_factory=list)
+    results: list[ScoredFile] = field(default_factory=list)

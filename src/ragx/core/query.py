@@ -1,4 +1,5 @@
-"""Query pipeline: expansion -> fan-out retrieval -> RRF -> heat traversal -> rerank -> combine."""
+"""Query pipeline: expansion -> fan-out retrieval -> RRF -> heat traversal -> rerank -> combine
+-> fold per file."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ from ragx.core.config import Config, db_path, vectors_path
 from ragx.core.errors import RagxError
 from ragx.core.expansion import expand_query
 from ragx.core.fusion import rrf
+from ragx.core.grouping import group_by_file
 from ragx.core.models import QueryOutput, ScoredChunk
 from ragx.core.scoring import combine
 from ragx.core.store import Store
@@ -23,7 +25,7 @@ RERANK_CAP = 100  # cross-encoder cost guard: rerank at most this many candidate
 
 @dataclass
 class QueryOptions:
-    top: int = 8
+    top: int = 20  # result entries (files), not chunks
     files_only: bool = False
     expand: bool = False
     graph: bool = True
@@ -117,10 +119,11 @@ def run_query(
             candidates = ordered  # unreranked stragglers would score 0 anyway
 
         # 5. combined scoring + output
+        # every candidate is ranked so a file's chunks can be folded into one entry
         final = combine(candidates, fused, heat, rerank_scores, alpha=alpha, beta=beta, gamma=gamma)
-        top_ids = sorted(candidates, key=lambda c: (-final.get(c, 0.0), c))[: opts.top]
-        by_id = {c.id: c for c in store.get_chunks(top_ids)}
-        results = [
+        ranked_ids = sorted(candidates, key=lambda c: (-final.get(c, 0.0), c))
+        by_id = {c.id: c for c in store.get_chunks(ranked_ids)}
+        ranked = (
             ScoredChunk(
                 chunk=by_id[cid],
                 score=final.get(cid, 0.0),
@@ -129,53 +132,53 @@ def run_query(
                 rerank_score=(rerank_scores or {}).get(cid, 0.0),
                 explain=trace.get(cid) if opts.explain else None,
             )
-            for cid in top_ids
+            for cid in ranked_ids
             if cid in by_id
-        ]
-        return QueryOutput(query=text, variants=variants, results=results)
+        )
+        return QueryOutput(query=text, variants=variants, results=group_by_file(ranked, opts.top))
 
 
 def to_query_json(out: QueryOutput, *, max_chunk_chars: int = 1200) -> dict:
-    """Serialize as the versioned agent-facing schema."""
+    """Serialize as the versioned agent-facing schema: one entry per file, its best
+    chunks nested under `chunks`."""
     return {
-        "schema": "ragx.query.v1",
+        "schema": "ragx.query.v2",
         "query": out.query,
         "variants": out.variants,
         "results": [
             {
-                "chunk_id": r.chunk.id,
-                "file": r.chunk.file_path,
-                "line_start": r.chunk.line_start,
-                "line_end": r.chunk.line_end,
-                "byte_start": r.chunk.byte_start,
-                "byte_end": r.chunk.byte_end,
-                "score": round(r.score, 6),
-                "breakdown": {
-                    "vector": round(r.vector_score, 6),
-                    "heat": round(r.heat, 6),
-                    "rerank": round(r.rerank_score, 6),
-                },
-                "text": r.chunk.text[:max_chunk_chars],
-                "truncated": len(r.chunk.text) > max_chunk_chars,
-                **({"explain": r.explain} if r.explain else {}),
+                "file": f.file_path,
+                "score": round(f.score, 6),
+                "chunks": [_chunk_json(r, max_chunk_chars) for r in f.chunks],
             }
-            for r in out.results
+            for f in out.results
         ],
     }
 
 
+def _chunk_json(r: ScoredChunk, max_chunk_chars: int) -> dict:
+    return {
+        "chunk_id": r.chunk.id,
+        "line_start": r.chunk.line_start,
+        "line_end": r.chunk.line_end,
+        "byte_start": r.chunk.byte_start,
+        "byte_end": r.chunk.byte_end,
+        "score": round(r.score, 6),
+        "breakdown": {
+            "vector": round(r.vector_score, 6),
+            "heat": round(r.heat, 6),
+            "rerank": round(r.rerank_score, 6),
+        },
+        "text": r.chunk.text[:max_chunk_chars],
+        "truncated": len(r.chunk.text) > max_chunk_chars,
+        **({"explain": r.explain} if r.explain else {}),
+    }
+
+
 def to_files_json(out: QueryOutput) -> dict:
-    """Aggregate chunk scores per file: sum of each file's top-3 chunk scores."""
-    per_file: dict[str, list[ScoredChunk]] = {}
-    for r in out.results:
-        per_file.setdefault(r.chunk.file_path, []).append(r)
+    """File list without chunk text; same entries and scores as `to_query_json`."""
     files = [
-        {
-            "file": path,
-            "score": round(sum(sorted((r.score for r in rs), reverse=True)[:3]), 6),
-            "chunk_ids": [r.chunk.id for r in sorted(rs, key=lambda r: r.score, reverse=True)],
-        }
-        for path, rs in per_file.items()
+        {"file": f.file_path, "score": round(f.score, 6), "chunk_ids": [r.chunk.id for r in f.chunks]}
+        for f in out.results
     ]
-    files.sort(key=lambda f: f["score"], reverse=True)
     return {"schema": "ragx.files.v1", "query": out.query, "variants": out.variants, "files": files}

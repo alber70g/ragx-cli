@@ -55,12 +55,15 @@ def test_index_then_query(tmp_path):
 
     out = run_query(tmp_path, cfg, emb, "dogs bark cats", QueryOptions(top=3))
     assert out.results
-    assert out.results[0].chunk.file_path == "pets.md"
+    assert out.results[0].file_path == "pets.md"
 
     doc = to_query_json(out)
-    assert doc["schema"] == "ragx.query.v1"
-    r = doc["results"][0]
-    assert set(r) >= {"chunk_id", "file", "line_start", "byte_start", "score", "breakdown", "text"}
+    assert doc["schema"] == "ragx.query.v2"
+    entry = doc["results"][0]
+    assert entry["file"] == "pets.md"
+    assert set(entry["chunks"][0]) >= {"chunk_id", "line_start", "byte_start", "score", "breakdown", "text"}
+    # one entry per file: a file never appears twice in the results
+    assert len({e["file"] for e in doc["results"]}) == len(doc["results"])
 
     files = to_files_json(out)
     assert files["schema"] == "ragx.files.v1"
@@ -87,8 +90,8 @@ def test_incremental_reindex(tmp_path):
     assert stats.files_deleted == 1
 
     out = run_query(tmp_path, cfg, emb, "hamsters wheels", QueryOptions(top=3))
-    assert out.results[0].chunk.file_path == "pets.md"
-    assert all(r.chunk.file_path != "space.md" for r in out.results)
+    assert out.results[0].file_path == "pets.md"
+    assert all(f.file_path != "space.md" for f in out.results)
 
 
 def test_graph_edges_and_traversal(tmp_path):
@@ -106,11 +109,12 @@ def test_graph_edges_and_traversal(tmp_path):
         QueryOptions(top=4, expand=False, rerank=False, explain=True),
     )
     assert out.results
-    files = {r.chunk.file_path for r in out.results}
+    files = {f.file_path for f in out.results}
     assert {"pets.md", "pets2.md"} <= files
     # explain traces exist and parent-chains terminate at a seed (hop 0)
-    assert all(r.explain is not None for r in out.results)
-    assert any(r.explain["hop"] == 0 for r in out.results)
+    chunks = [r for f in out.results for r in f.chunks]
+    assert all(r.explain is not None for r in chunks)
+    assert any(r.explain["hop"] == 0 for r in chunks)
 
 
 def test_subchunk_edges_end_to_end(tmp_path):
@@ -140,7 +144,7 @@ def test_subchunk_edges_end_to_end(tmp_path):
         assert weights[rid] > 0.95
 
     out = run_query(tmp_path, cfg, emb, "dogs bark strangers", QueryOptions(top=3, expand=False, rerank=False))
-    assert out.results[0].chunk.file_path in ("dogs.md", "mixed.md")
+    assert out.results[0].file_path in ("dogs.md", "mixed.md")
 
 
 def test_subchunk_incremental_reindex(tmp_path):
@@ -163,7 +167,7 @@ def test_subchunk_incremental_reindex(tmp_path):
         parents = {cid for cid, _ in store.all_subchunk_vectors()}
         assert parents == set(store.all_chunk_ids())
     out = run_query(tmp_path, cfg, emb, "hamsters wheels", QueryOptions(top=3))
-    assert out.results[0].chunk.file_path == "pets.md"
+    assert out.results[0].file_path == "pets.md"
 
 
 def test_incremental_fails_loud_on_edge_source_flip(tmp_path):
