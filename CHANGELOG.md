@@ -4,6 +4,29 @@ All notable changes to `ragx-cli` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **`query` defaults to vector search + graph traversal.** Query expansion and
+  cross-encoder rerank are now opt-in via `--expand` and `--rerank` (`QueryOptions`
+  defaults `expand=False`, `rerank=False`). A default query makes no LLM call and loads
+  no reranker. `--no-graph` is unchanged. `--no-expand` and `--no-rerank` still parse
+  as deprecated no-ops with a stderr warning. For the previous behaviour pass
+  `--expand --rerank`.
+- **Default corpus globs index source code and text docs only.** `corpus.include` lists
+  ~70 source extensions, `Dockerfile`, `Makefile`, and `*.md`/`*.mdx`/`*.rst`/`*.txt`/
+  `*.adoc`/`*.org`; `corpus.exclude` skips lockfiles, `requirements*.txt`,
+  `constraints*.txt`, licenses, minified files, source maps, and `dist/`, `build/`,
+  `target/`, `coverage/`, `vendor/`. Applies to new `ragx-cli init` configs; an existing
+  `ragx.toml` keeps its lists.
+
+
+### Added
+
+- `ragx-cli init` prints a note that an AI agent can tailor `corpus.include`/`exclude`
+  to the project and add a CLAUDE.md/AGENTS.md section on using `ragx-cli query`.
+
 ## [0.7.0] — 2026-09-17
 
 ### Added

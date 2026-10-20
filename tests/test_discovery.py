@@ -133,3 +133,25 @@ def test_discover_skips_node_modules(tmp_path):
     (tmp_path / "node_modules" / "pkg" / "README.md").write_text("# pkg\n")
     (tmp_path / "real.md").write_text("# real\n")
     assert discover_files(tmp_path, ["**/*.md"], []) == ["real.md"]
+
+
+def test_default_globs_index_source_and_docs_but_not_dependency_files(tmp_path: Path):
+    """Lockfiles and dependency manifests are large, repetitive and match many queries
+    lexically; indexing them crowds real code and prose out of the results."""
+    from ragx.core.corpus_globs import DEFAULT_EXCLUDE, DEFAULT_INCLUDE
+
+    for rel in [
+        "README.md", "docs/guide.rst", "notes.txt", "src/app.py", "web/index.tsx",
+        "cmd/main.go", "Dockerfile",
+        "package-lock.json", "package.json", "yarn.lock", "uv.lock", "Cargo.lock",
+        "go.sum", "requirements.txt", "requirements-dev.txt", "LICENSE.md",
+        "static/app.min.js", "dist/bundle.js", "web/build/out.js", "data.csv",
+    ]:
+        _write(tmp_path, rel)
+
+    files = discover_files(tmp_path, include=DEFAULT_INCLUDE, exclude=DEFAULT_EXCLUDE)
+
+    assert files == [
+        "Dockerfile", "README.md", "cmd/main.go", "docs/guide.rst", "notes.txt",
+        "src/app.py", "web/index.tsx",
+    ]

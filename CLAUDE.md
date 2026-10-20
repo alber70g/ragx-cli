@@ -81,12 +81,13 @@ src/ragx/
   cli/             # thin shells only: app.py (init/status/config + registration),
                    # pipeline.py (index/query), inspect_cmd.py, eval_cmd.py, models_cmd.py
                    # (recommend/download/configure models), doctor_cmd.py, output.py
-tests/             # 244 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
+tests/             # 249 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
 ```
 
 ## Flows
 
-**Index** (`ragx-cli index [--changed]`): discover files (include/exclude globs, root .gitignore,
+**Index** (`ragx-cli index [--changed]`): discover files (include/exclude globs — defaults in
+`core/corpus_globs.py`: source + text docs, minus lockfiles/requirements/build output — root .gitignore,
 skip node_modules/.venv/hidden/binaries/>2MB) → xxhash diff (`--changed` = incremental, default
 = full rebuild) → chunk (~800 tok target, chunks are exact byte slices, sub-100-char fragments
 merge into neighbors) → embed batched → HNSW add → kNN edges per new chunk (k=8, cos ≥ 0.55)
@@ -116,7 +117,9 @@ no-op on failure) → embed all variants, HNSW top-20 each → RRF merge = seeds
 (2 hops, decay 0.5, heat = max not sum, neighbor admitted only if cos(query) ≥ 0.35 floor,
 frontier ≤ 150) → cross-encoder rerank of top-100 shortlist → final =
 0.6·rerank + 0.25·heat + 0.15·vector (each min-max normalized; weights renormalize when a
-stage is off). `--no-expand/--no-graph/--no-rerank` skip stages; `--files-only` ranks files
+stage is off). Since 0.8.0 expansion and rerank are OPT-IN (`--expand`/`--rerank`;
+`QueryOptions` defaults expand=False, rerank=False; `--no-expand/--no-rerank` are hidden
+deprecated no-ops); graph stays on, `--no-graph` skips it; `--files-only` ranks files
 by sum of top-3 chunk scores; `--explain` attaches seed→parent→edge_weight→hop traces.
 
 ## State & benchmarks (as of 2026-07-10)
@@ -129,7 +132,8 @@ full .759/**.889**/**.613**. Key finding: graph-only HURTS precision (near-dupli
 displace direct hits — parameter sweeps plateau below baseline MRR; corpus property, not a
 tuning miss), but graph+rerank together deliver the recall win — one Dutch query's target is
 unreachable by vector search or rerank-alone, surfaced only via a hop-1 edge then reranked
-19→4. Ship graph+rerank together; `--no-graph --no-rerank` is the explicit fast mode.
+19→4. Graph+rerank belong together for quality (`--rerank`); the 0.8.0 default (graph, no
+rerank) is the measured "graph-only" row — chosen for speed, not quality.
 
 UPDATE 2026-07-13: production embedding model is now `text-embedding-bge-m3` (Q8 GGUF, empty
 doc/query prefixes) — notes-repo corpus config + index flipped in place from the worktree-built
@@ -170,7 +174,7 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 
 ## Dev loop
 
-`uv sync --group dev --extra rerank` · `uv run pytest -q` (244 pass, ~5 s) ·
+`uv sync --group dev --extra rerank` · `uv run pytest -q` (249 pass, ~5 s) ·
 `uv run ruff check src tests` · file soft cap ~150 lines · expected failures raise `RagxError`
 (CLI maps to exit 2). Live smoke: LM Studio must be running with the configured embedding model.
 Changes that impact usage (CLI flags, config keys/precedence, output schemas, install steps)

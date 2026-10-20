@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 from ragx.cli.app import REPO_URL, app
 from ragx.cli.output import migrate_confirm
 from ragx.core.config import CONFIG_FILE, Config
+from ragx.core.corpus_globs import DEFAULT_EXCLUDE, DEFAULT_INCLUDE
 
 runner = CliRunner()
 
@@ -95,12 +96,17 @@ def test_init_interactive_no_servers_expansion_off(tmp_path):
     data = _read_config(tmp_path)
     assert data["embeddings"]["model"] == "text-embedding-nomic-embed-text-v1.5@q4_k_m"
     assert data["expansion"]["enabled"] is False
-    assert data["corpus"]["include"] == ["**/*"]
+    # the long default glob lists survive the comma-joined prompt round trip intact
+    assert data["corpus"]["include"] == DEFAULT_INCLUDE
+    assert data["corpus"]["exclude"] == DEFAULT_EXCLUDE
 
 
 def test_init_yes_skips_prompts(tmp_path):
     result = runner.invoke(app, ["init", str(tmp_path), "--yes", "--interactive"])
     assert result.exit_code == 0
+    # agents running a non-interactive init still learn the globs are generic defaults
+    assert "corpus.include/exclude" in result.output
+    assert "CLAUDE.md or AGENTS.md" in result.output
     data = _read_config(tmp_path)
     assert data["embeddings"]["provider"] == "openai"
 

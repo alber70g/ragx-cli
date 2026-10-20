@@ -11,8 +11,9 @@ description: |
 # ragx-cli — semantic search over an indexed corpus
 
 Indexes files into a chunk-level embedding similarity graph; answers queries via vector search +
-graph traversal + cross-encoder rerank. Agent-first: one JSON doc on stdout, logs on stderr,
-deterministic exit codes, byte-exact source locations.
+graph traversal, with optional cross-encoder rerank (`--rerank`) and LLM expansion (`--expand`).
+Agent-first: one JSON doc on stdout, logs on stderr, deterministic exit codes, byte-exact source
+locations.
 
 ## When
 
@@ -30,13 +31,15 @@ A corpus is ragx-indexed if its root has `ragx.toml` and `.ragx/`.
 ragx-cli status --json          # root, model, counts, and drift (new/changed/deleted vs index)
 ragx-cli query "question" --json --files-only   # which files are relevant — most-used mode
 ragx-cli query "..." --json --top 8             # ranked chunks with exact locations
-ragx-cli query "..." --json --no-expand --no-rerank   # fast: skip LLM call + cross-encoder
+ragx-cli query "..." --json --rerank            # higher precision: cross-encoder rerank (slower)
 echo "..." | ragx-cli query - --json            # long/multiline query from stdin
 ragx-cli index                  # incremental reindex (hash-based, cheap) — the default
 ragx-cli index --full           # full rebuild: re-chunks + re-embeds everything
 ```
 
-Other query flags: `--no-graph`, `--hops N`, `--explain`.
+Other query flags: `--expand` (one LLM call: multi-query + HyDE), `--no-graph` (pure vector),
+`--hops N`, `--explain`. `--no-expand`/`--no-rerank` are deprecated no-ops (both stages are off
+by default).
 
 ## Output
 

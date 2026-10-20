@@ -25,9 +25,9 @@ RERANK_CAP = 100  # cross-encoder cost guard: rerank at most this many candidate
 class QueryOptions:
     top: int = 8
     files_only: bool = False
-    expand: bool = True
+    expand: bool = False
     graph: bool = True
-    rerank: bool = True
+    rerank: bool = False
     hops: int | None = None
     explain: bool = False
 

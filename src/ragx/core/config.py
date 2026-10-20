@@ -13,6 +13,7 @@ from typing import Any
 
 import tomli_w
 
+from ragx.core.corpus_globs import DEFAULT_EXCLUDE, DEFAULT_INCLUDE
 from ragx.core.errors import NotInitializedError, RagxError
 
 RAGX_DIR = ".ragx"
@@ -26,7 +27,11 @@ def rc_path() -> Path:
     return Path.home() / ".ragxrc"
 
 DEFAULTS: dict[str, dict[str, Any]] = {
-    "corpus": {"include": ["**/*"], "exclude": [], "respect_gitignore": True},
+    "corpus": {
+        "include": DEFAULT_INCLUDE,
+        "exclude": DEFAULT_EXCLUDE,
+        "respect_gitignore": True,
+    },
     "chunking": {"size_tokens": 800, "overlap": 0.15},
     "graph": {
         "k": 8,

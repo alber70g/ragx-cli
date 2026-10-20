@@ -102,18 +102,20 @@ since the last index) so you can see when a re-index is due without running one.
 
 ### Querying
 
-Every stage is individually skippable (`--no-expand`, `--no-graph`, `--no-rerank`) so callers
-can trade quality for latency.
+A default query runs vector search + graph traversal: no LLM call, no cross-encoder.
+Expansion (`--expand`) and rerank (`--rerank`) are opt-in; `--no-graph` skips traversal,
+which leaves pure vector search. Callers trade latency for quality per query.
 
 ```mermaid
 flowchart TD
     Q[query] --> X["1 · expansion (optional, one LLM call)<br/>2–4 reformulations + HyDE passage"]
     X --> S["2 · fan-out vector search<br/>top-20 per variant"]
-    Q -. "--no-expand" .-> S
+    Q -. "default (no --expand)" .-> S
     S --> R["3 · Reciprocal Rank Fusion<br/>merged seed set"]
     R --> H["4 · heat propagation over the graph<br/>2 hops · decay 0.5 · max-aggregation<br/>query-similarity floor · frontier cap"]
     R -. "--no-graph" .-> K
-    H --> K["5 · cross-encoder rerank<br/>(query, chunk) pairs, capped shortlist"]
+    H --> K["5 · cross-encoder rerank (--rerank)<br/>(query, chunk) pairs, capped shortlist"]
+    H -. "default (no --rerank)" .-> F
     K --> F["6 · combined score<br/>α·rerank + β·heat + γ·vector"]
     F --> O["ranked chunks (or files via --files-only)<br/>+ --explain traversal trace"]
 ```
@@ -182,8 +184,10 @@ output for that result shows the exact seed → edge → chunk path.
 **Honest caveat:** graph traversal *alone* hurts precision on this corpus (MRR 0.593 → 0.522) —
 near-duplicate neighbors (e.g. adjacent meeting notes) displace weaker direct hits. A parameter
 sweep over decay/floor/weights plateaued below baseline MRR, so this is a property of
-similarity-only edges, not a tuning miss. Conclusion baked into the defaults: **graph and
-rerank ship together**. Use `--no-graph --no-rerank` as the explicit fast mode.
+similarity-only edges, not a tuning miss. Conclusion: **graph and rerank belong together**.
+Since 0.8.0 the CLI default is the fast path (vector + graph, no rerank), which is the
+"graph-only" row above; pass `--rerank` for the measured best quality, or `--no-graph` for
+pure vector search.
 
 The parameter study below explains the mechanism behind this caveat — and shows that once the
 scoring weights stop putting heat into the final score, the graph win gets much bigger.
@@ -433,7 +437,8 @@ questions; fall back to grep for exact identifiers.
 - Get chunks with exact locations: `ragx-cli query "..." --json --top 8` — each result carries
   `file` + `line_start/line_end`; the JSON `text` is truncated, so read the file yourself
   for full context.
-- Fast mode (no LLM call, no cross-encoder): add `--no-expand --no-rerank`.
+- The default query makes no LLM call and loads no cross-encoder. For higher precision add
+  `--rerank`; add `--expand` for an LLM query-expansion pass (one extra LLM call).
 - After adding or editing files: `ragx-cli index` (incremental and cheap — hash-based).
   `ragx-cli status --json` shows `drift` counts if you want to check staleness first.
 - stdout is exactly one JSON document; logs are on stderr.
@@ -583,10 +588,15 @@ non-thinking model is the better expansion choice; detection is a best-effort na
 heuristic, the APIs expose no capability flag), and corpus include/exclude
 (gitignore-style globs, comma-separated). Every prompt is pre-filled with the defaults
 below — Enter accepts them all. With piped stdin (agents), `--yes`, or
-`--no-interactive`, it writes the defaults unchanged, exactly as before. Key defaults:
+`--no-interactive`, it writes the defaults unchanged, exactly as before. After writing the
+config, `init` prints a note: an AI agent can tailor `corpus.include`/`exclude` to the
+project, and add a CLAUDE.md/AGENTS.md section on searching it with `ragx-cli query`
+(see [Using ragx-cli from a coding agent](#using-ragx-cli-from-a-coding-agent-claudemd--agentsmd)).
+Key defaults:
 
 | section | defaults |
 |---|---|
+| `[corpus]` | `include` = source code (`*.py`, `*.ts`, `*.go`, `*.rs`, … ~70 extensions, plus `Dockerfile`/`Makefile`) and text docs (`*.md`, `*.mdx`, `*.rst`, `*.txt`, `*.adoc`, `*.org`); `exclude` = lockfiles (`*.lock`, `package-lock.json`, `pnpm-lock.yaml`, `go.sum`, …), `requirements*.txt`/`constraints*.txt`, `LICENSE*`/`COPYING*`, `*.min.js`/`*.min.css`/`*.map`, and `dist/`, `build/`, `target/`, `coverage/`, `vendor/`; `respect_gitignore=true`. Full lists: `src/ragx/core/corpus_globs.py`. Existing `ragx.toml` files keep their own lists |
 | `[chunking]` | `size_tokens=800`, `overlap=0.15` |
 | `[graph]` | `k=8`, `min_edge_sim=0.55`, `edge_source="chunk"`, `subchunk_size_tokens=128`, `near_dup_sim=0.9` |
 | `[traversal]` | `hops=2`, `decay=0.5`, `query_floor=0.35`, `max_frontier=150` |

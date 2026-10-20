@@ -27,6 +27,13 @@ from ragx.core.config import (
 from ragx.core.errors import RagxError
 
 REPO_URL = "https://github.com/alber70g/ragx-cli"
+INIT_NOTE = (
+    "note: corpus.include/exclude default to source code and text docs, minus lockfiles,\n"
+    "dependency manifests and build output. An AI agent (Claude Code, Codex, ...) can:\n"
+    f"  1. tailor corpus.include/exclude in {CONFIG_FILE} to this project's files\n"
+    "  2. add a section to CLAUDE.md or AGENTS.md telling agents to search this corpus\n"
+    '     with `ragx-cli query "..."` (--json for machine output, --files-only for paths)'
+)
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 config_app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -133,6 +140,7 @@ def init(
     else:
         cfg_path = write_default_config(root)
     typer.echo(f"created {cfg_path}")
+    typer.echo(INIT_NOTE)
     if ask and typer.confirm(
         "recommend + download models via LM Studio now? (rerun anytime: `ragx-cli models`)",
         default=False,

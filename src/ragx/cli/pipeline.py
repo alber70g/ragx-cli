@@ -67,13 +67,22 @@ def query(
     top: int | None = typer.Option(None, "--top"),
     json_out: bool = typer.Option(False, "--json"),
     files_only: bool = typer.Option(False, "--files-only"),
-    no_expand: bool = typer.Option(False, "--no-expand"),
+    expand: bool = typer.Option(False, "--expand", help="LLM query expansion (multi-query + HyDE)"),
     no_graph: bool = typer.Option(False, "--no-graph"),
-    no_rerank: bool = typer.Option(False, "--no-rerank"),
+    rerank: bool = typer.Option(False, "--rerank", help="cross-encoder rerank of the shortlist"),
+    no_expand: bool = typer.Option(
+        False, "--no-expand", hidden=True, help="deprecated: expansion is now off by default"
+    ),
+    no_rerank: bool = typer.Option(
+        False, "--no-rerank", hidden=True, help="deprecated: rerank is now off by default"
+    ),
     hops: int | None = typer.Option(None, "--hops"),
     explain: bool = typer.Option(False, "--explain"),
 ) -> None:
     """Search the index; ranked chunks (or files with --files-only)."""
+    for flag, used in (("--no-expand", no_expand), ("--no-rerank", no_rerank)):
+        if used:
+            print(f"warning: {flag} is deprecated; that stage is now off by default", file=sys.stderr)
     if text == "-":
         text = sys.stdin.read().strip()
     try:
@@ -83,9 +92,9 @@ def query(
         opts = QueryOptions(
             top=top if top is not None else cfg.get("query.top"),
             files_only=files_only,
-            expand=not no_expand,
+            expand=expand,
             graph=not no_graph,
-            rerank=not no_rerank,
+            rerank=rerank,
             hops=hops,
             explain=explain,
         )
