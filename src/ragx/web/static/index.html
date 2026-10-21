@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ragx graph</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>ragx</h1>
+    <dl id="meta" class="meta" aria-label="Index summary"></dl>
+  </header>
+
+  <main class="workspace">
+    <section class="stage" aria-label="Chunk similarity graph">
+      <div id="graph" class="graph"></div>
+      <div class="toolbar">
+        <span id="layout-status" class="layout-status"></span>
+        <button id="layout-btn" type="button" disabled>Re-run layout</button>
+        <button id="fit-btn" type="button">Fit view</button>
+      </div>
+      <div id="overlay" class="overlay">Loading graph…</div>
+      <div id="tooltip" class="tooltip" hidden></div>
+    </section>
+
+    <aside class="sidebar">
+      <form id="query-form" class="query" autocomplete="off">
+        <div class="query-row">
+          <input id="q-text" name="text" type="search" placeholder="Query the corpus" required
+                 aria-label="Query text">
+          <button id="q-submit" type="submit" class="primary">Search</button>
+          <button id="q-clear" type="button">Clear</button>
+        </div>
+        <fieldset class="options">
+          <legend class="sr-only">Query options</legend>
+          <label class="num">top <input id="q-top" type="number" min="1" value="20"></label>
+          <label class="num">hops <input id="q-hops" type="number" min="0" placeholder="cfg"
+                 title="Blank = config value"></label>
+          <label class="num">context <input id="q-context" type="number" min="0" value="5"
+                 title="Sets both before and after"></label>
+          <label class="num">before <input id="q-before" type="number" min="0" value="5"></label>
+          <label class="num">after <input id="q-after" type="number" min="0" value="5"></label>
+          <label class="check"><input id="q-graph" type="checkbox" checked> graph</label>
+          <label class="check"><input id="q-expand" type="checkbox"> expand</label>
+          <label class="check"><input id="q-rerank" type="checkbox"> rerank</label>
+          <label class="check"><input id="q-explain" type="checkbox"> explain</label>
+        </fieldset>
+      </form>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+      <div id="panel" class="panel">
+        <p class="hint">Run a query to light up its result chunks, or click a node to read
+          that chunk and its neighbors.</p>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/static/vendor/graphology.umd.min.js"></script>
+  <script src="/static/vendor/graphology-library.min.js"></script>
+  <script src="/static/vendor/sigma.min.js"></script>
+  <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

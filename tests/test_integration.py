@@ -58,7 +58,7 @@ def test_index_then_query(tmp_path):
     assert out.results[0].file_path == "pets.md"
 
     doc = to_query_json(out)
-    assert doc["schema"] == "ragx.query.v2"
+    assert doc["schema"] == "ragx.query.v3"
     entry = doc["results"][0]
     assert entry["file"] == "pets.md"
     assert set(entry["chunks"][0]) >= {"chunk_id", "line_start", "byte_start", "score", "breakdown", "text"}
@@ -68,6 +68,58 @@ def test_index_then_query(tmp_path):
     files = to_files_json(out)
     assert files["schema"] == "ragx.files.v1"
     assert files["files"][0]["file"] == "pets.md"
+
+
+def test_query_context_lines_appear_in_v3_output(tmp_path):
+    (tmp_path / "pets.md").write_text(
+        "# Pets\n\nline a\nline b\n\nDogs bark loudly. Cats purr softly.\n\nline c\nline d\n"
+    )
+    write_default_config(tmp_path)
+    cfg = Config.load(tmp_path)
+    cfg.set("chunking.size_tokens", "4")  # force a chunk boundary around the "dogs" sentence
+    emb = FakeEmbedder()
+    run_index(tmp_path, cfg, emb)
+
+    out = run_query(tmp_path, cfg, emb, "dogs bark cats", QueryOptions(top=3, before=2, after=2))
+    chunk = next(r for f in out.results for r in f.chunks if "Dogs bark" in r.chunk.text)
+    assert chunk.context is not None
+    assert chunk.context["before"] is not None
+    assert chunk.context["after"] is not None
+
+    doc = to_query_json(out)
+    assert doc["schema"] == "ragx.query.v3"
+    entries = [c for f in doc["results"] for c in f["chunks"] if "Dogs bark" in c["text"]]
+    assert entries and "context" in entries[0]
+    assert set(entries[0]["context"]) == {"before", "after"}
+
+
+def test_query_context_omitted_when_both_sides_zero(tmp_path):
+    make_corpus(tmp_path)
+    write_default_config(tmp_path)
+    cfg = Config.load(tmp_path)
+    emb = FakeEmbedder()
+    run_index(tmp_path, cfg, emb)
+
+    out = run_query(tmp_path, cfg, emb, "dogs bark cats", QueryOptions(top=3, before=0, after=0))
+    doc = to_query_json(out)
+    assert "context" not in doc["results"][0]["chunks"][0]
+
+
+def test_query_context_nulls_on_file_deleted_after_indexing(tmp_path):
+    make_corpus(tmp_path)
+    write_default_config(tmp_path)
+    cfg = Config.load(tmp_path)
+    emb = FakeEmbedder()
+    run_index(tmp_path, cfg, emb)
+
+    (tmp_path / "pets.md").unlink()  # index entry still points at it until the next `index`
+    out = run_query(tmp_path, cfg, emb, "dogs bark cats", QueryOptions(top=3, before=3, after=3))
+    entry = next(f for f in out.results if f.file_path == "pets.md")
+    assert entry.chunks[0].context == {"before": None, "after": None}
+
+    doc = to_query_json(out)
+    file_entry = next(f for f in doc["results"] if f["file"] == "pets.md")
+    assert file_entry["chunks"][0]["context"] == {"before": None, "after": None}
 
 
 def test_incremental_reindex(tmp_path):
@@ -115,6 +167,10 @@ def test_graph_edges_and_traversal(tmp_path):
     chunks = [r for f in out.results for r in f.chunks]
     assert all(r.explain is not None for r in chunks)
     assert any(r.explain["hop"] == 0 for r in chunks)
+    # path is the seed-first parent chain; seed and path[0] can never disagree
+    for r in chunks:
+        assert r.explain["path"][0] == r.explain["seed"]
+        assert r.explain["path"][-1] == r.chunk.id
 
 
 def test_subchunk_edges_end_to_end(tmp_path):
@@ -174,12 +230,17 @@ def test_incremental_fails_loud_on_edge_source_flip(tmp_path):
     make_corpus(tmp_path)
     write_default_config(tmp_path)
     cfg = Config.load(tmp_path)
+    cfg.set("graph.edge_source", "chunk")
     emb = FakeEmbedder()
     run_index(tmp_path, cfg, emb)  # built with edge_source=chunk
 
     cfg.set("graph.edge_source", "subchunk")
-    with pytest.raises(ManifestMismatchError):
+    with pytest.raises(ManifestMismatchError) as exc_info:
         run_index(tmp_path, cfg, emb)
+    message = str(exc_info.value)
+    assert "edge_source" in message
+    assert "'chunk'" in message and "'subchunk'" in message
+    assert "--full" in message
     stats = run_index(tmp_path, cfg, emb, full=True)  # explicit rebuild clears the mismatch
     assert stats.files_indexed == 3
 

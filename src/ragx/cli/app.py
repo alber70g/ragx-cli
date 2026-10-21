@@ -39,13 +39,14 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 config_app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(config_app, name="config")
 
-from ragx.cli import doctor_cmd, eval_cmd, inspect_cmd, models_cmd, pipeline  # noqa: E402  (needs `app` defined above)
+from ragx.cli import doctor_cmd, eval_cmd, inspect_cmd, models_cmd, pipeline, web_cmd  # noqa: E402  (needs `app` defined above)
 
 pipeline.register(app)
 inspect_cmd.register(app)
 eval_cmd.register(app)
 models_cmd.register(app)
 doctor_cmd.register(app)
+web_cmd.register(app)
 
 
 def _print_version() -> None:

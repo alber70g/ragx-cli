@@ -152,7 +152,8 @@ def _check_manifest(
         if prev and prev != str(current) and not allow_rewrite:
             raise ManifestMismatchError(
                 f"index was built with {key}={prev!r} but config says {current!r}; "
-                "run `ragx-cli index --full` to rebuild"
+                "run `ragx-cli index --full` to rebuild, or pin the old value "
+                f"({key} = {prev!r}) in ragx.toml to keep the existing index"
             )
 
 

@@ -38,28 +38,30 @@ ragx-cli index --full           # full rebuild: re-chunks + re-embeds everything
 ```
 
 Other query flags: `--expand` (one LLM call: multi-query + HyDE), `--no-graph` (pure vector),
-`--hops N`, `--explain`. `--no-expand`/`--no-rerank` are deprecated no-ops (both stages are off
-by default).
+`--hops N`, `--explain`, `-B/-A N` (context lines before/after each chunk), `-C N` (both sides;
+default 5). `--no-expand`/`--no-rerank` are deprecated no-ops (both stages are off by default).
 
 ## Output
 
-- stdout is exactly one JSON doc (`ragx.query.v2` / `ragx.files.v1` / `ragx.status.v1`); logs go
+- stdout is exactly one JSON doc (`ragx.query.v3` / `ragx.files.v1` / `ragx.status.v1`); logs go
   to stderr. Never parse stderr.
 - Exit codes: `0` results, `1` success-but-empty (report "nothing found", don't retry as failure),
   `2` error.
-- `ragx.query.v2` results are one entry per file (default 20): `file`, `score` (sum of its
+- `ragx.query.v3` results are one entry per file (default 20): `file`, `score` (sum of its
   chunks), `chunks` (up to 3, each with `line_start/end`, `byte_start/end`, `score`,
-  `breakdown`, `text`). JSON `text` is truncated — read the file at the line range for full
-  context.
+  `breakdown`, `text`, `context`). JSON `text` is truncated — read the file at the line range
+  for full context. `context` carries `-B`/`-A` grep-style lines around the chunk (default 5
+  each; `-C N`/`-B N`/`-A N`, or `query.context_lines` in config).
 - Typical flow: `--files-only` to pick files → `--json` for line ranges → read files at ranges.
 
 ## Freshness
 
 - `status` includes `drift` counts; nonzero means the index is stale → run `ragx-cli index`
   (incremental, safe, converges even after include/exclude glob changes).
-- Changing `embeddings.model`, `chunking.*`, or `graph.edge_source` invalidates the index:
-  commands fail loud on the manifest mismatch, and the fix is `ragx-cli index --full` —
-  re-embeds everything, so confirm before running on a large corpus.
+- Changing `embeddings.model`, `chunking.*`, or `graph.edge_source`/`subchunk_size_tokens`
+  invalidates the index: commands fail loud on the manifest mismatch, naming the changed
+  key and old/new value. Fix is `ragx-cli index --full` — re-embeds everything, so confirm
+  before running on a large corpus — or pin the old value back in `ragx.toml`.
 - `ragx-cli models` picks + downloads an embedding/reranker combo. All files download via
   LM Studio; serving is per engine — `--embed-engine llama-server|lm-studio` and
   `--rerank-engine llama-server|sentence-transformers`. With both on `llama-server`

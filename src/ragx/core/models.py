@@ -56,6 +56,7 @@ class ScoredChunk:
     heat: float = 0.0
     rerank_score: float = 0.0
     explain: dict | None = None  # traversal trace: seeds, edge paths, weights
+    context: dict | None = None  # {"before": Span | None, "after": Span | None}; see core/context.py
 
 
 @dataclass
@@ -69,7 +70,7 @@ class ScoredFile:
 
 @dataclass
 class QueryOutput:
-    """Top-level result of the query pipeline; serialized as ragx.query.v2."""
+    """Top-level result of the query pipeline; serialized as ragx.query.v3."""
 
     query: str
     variants: list[str] = field(default_factory=list)

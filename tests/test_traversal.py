@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ragx.core.traversal import propagate_heat
+from ragx.core.traversal import propagate_heat, trace_path
 
 
 def make_neighbors_fn(adjacency: dict[int, list[tuple[int, float]]]):
@@ -157,3 +157,41 @@ def test_empty_seeds():
     result = propagate_heat({}, make_neighbors_fn({}), full_sim({}))
     assert result.heat == {}
     assert result.trace == {}
+
+
+def test_trace_path_multi_hop_chain():
+    adjacency = {1: [(2, 0.8)], 2: [(3, 0.8)]}
+    result = propagate_heat(
+        {1: 1.0}, make_neighbors_fn(adjacency), full_sim({}), hops=2, query_floor=0.0,
+    )
+    assert trace_path(result.trace, 3) == [1, 2, 3]
+
+
+def test_trace_path_seed_returns_itself():
+    result = propagate_heat({1: 1.0}, make_neighbors_fn({}), full_sim({}), hops=1)
+    assert trace_path(result.trace, 1) == [1]
+
+
+def test_trace_path_uses_final_overwritten_parent_consistently():
+    # Node 3 is first reached via seed 1 (weak edge), then via seed 2 (stronger edge)
+    # overwrites its trace entry. A node reached only through 3 afterwards must chain
+    # back through the FINAL parent (seed 2), not the stale one (seed 1).
+    adjacency = {1: [(3, 0.2)], 2: [(3, 0.9)], 3: [(5, 0.9)]}
+    result = propagate_heat(
+        {1: 1.0, 2: 1.0}, make_neighbors_fn(adjacency), full_sim({}),
+        hops=2, decay=0.5, query_floor=0.0,
+    )
+    assert result.trace[3]["parent"] == 2
+    path = trace_path(result.trace, 5)
+    assert path == [2, 3, 5]
+    assert path[0] == result.trace[5]["seed"]
+
+
+def test_trace_path_guards_against_cycles_without_raising():
+    trace = {
+        1: {"seed": 1, "parent": 2, "edge_weight": 0.5, "hop": 1},
+        2: {"seed": 1, "parent": 1, "edge_weight": 0.5, "hop": 1},
+    }
+    path = trace_path(trace, 1)
+    assert len(path) == 2
+    assert set(path) == {1, 2}

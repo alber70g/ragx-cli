@@ -36,8 +36,8 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "graph": {
         "k": 8,
         "min_edge_sim": 0.55,
-        "edge_source": "chunk",  # "chunk" (whole-chunk cosine, k per chunk) | "subchunk" (k per SUB-chunk)
-        "subchunk_size_tokens": 128,
+        "edge_source": "subchunk",  # "subchunk" (k per SUB-chunk, default) | "chunk" (whole-chunk cosine, k per chunk)
+        "subchunk_size_tokens": 256,
         "near_dup_sim": 0.9,  # subchunk mode: drop edges whose whole-chunk cosine is already >= this
     },
     "traversal": {"hops": 2, "decay": 0.5, "query_floor": 0.35, "max_frontier": 150},
@@ -74,7 +74,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "gguf": "",  # llama-server only: path to the reranker GGUF (LM Studio dir works)
         "server_bin": "llama-server",  # llama-server only: binary name or path
     },
-    "query": {"top": 20, "max_chunk_chars": 1200},  # top = result entries (one per file)
+    "query": {"top": 20, "max_chunk_chars": 1200, "context_lines": 5},  # top = result entries (one per file)
 }
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from ragx.core.config import Config, db_path, vectors_path
+from ragx.core.context import attach_context
 from ragx.core.errors import RagxError
 from ragx.core.expansion import expand_query
 from ragx.core.fusion import rrf
@@ -16,7 +17,7 @@ from ragx.core.grouping import group_by_file
 from ragx.core.models import QueryOutput, ScoredChunk
 from ragx.core.scoring import combine
 from ragx.core.store import Store
-from ragx.core.traversal import propagate_heat
+from ragx.core.traversal import propagate_heat, trace_path
 from ragx.core.vectors import VectorIndex
 from ragx.providers.base import Embedder, Generator, Reranker
 
@@ -32,11 +33,23 @@ class QueryOptions:
     rerank: bool = False
     hops: int | None = None
     explain: bool = False
+    before: int = 5  # grep -B: non-empty lines of context before each result chunk
+    after: int = 5  # grep -A: non-empty lines of context after each result chunk
 
 
 def _normalize(vec: Sequence[float]) -> list[float]:
     norm = math.sqrt(sum(v * v for v in vec)) or 1.0
     return [v / norm for v in vec]
+
+
+def _explain(trace: dict[int, dict], cid: int) -> dict | None:
+    """Trace entry for `cid`, with `path` (seed-first parent chain) attached and
+    `seed` set to `path[0]` so the two fields can never disagree."""
+    entry = trace.get(cid)
+    if entry is None:
+        return None
+    path = trace_path(trace, cid)
+    return {**entry, "seed": path[0], "path": path}
 
 
 def _check_model(store: Store, embedder: Embedder) -> None:
@@ -130,19 +143,21 @@ def run_query(
                 vector_score=fused.get(cid, 0.0),
                 heat=heat.get(cid, 0.0),
                 rerank_score=(rerank_scores or {}).get(cid, 0.0),
-                explain=trace.get(cid) if opts.explain else None,
+                explain=_explain(trace, cid) if opts.explain else None,
             )
             for cid in ranked_ids
             if cid in by_id
         )
-        return QueryOutput(query=text, variants=variants, results=group_by_file(ranked, opts.top))
+        results = group_by_file(ranked, opts.top)
+        attach_context(root, results, opts.before, opts.after)
+        return QueryOutput(query=text, variants=variants, results=results)
 
 
 def to_query_json(out: QueryOutput, *, max_chunk_chars: int = 1200) -> dict:
     """Serialize as the versioned agent-facing schema: one entry per file, its best
     chunks nested under `chunks`."""
     return {
-        "schema": "ragx.query.v2",
+        "schema": "ragx.query.v3",
         "query": out.query,
         "variants": out.variants,
         "results": [
@@ -172,6 +187,7 @@ def _chunk_json(r: ScoredChunk, max_chunk_chars: int) -> dict:
         "text": r.chunk.text[:max_chunk_chars],
         "truncated": len(r.chunk.text) > max_chunk_chars,
         **({"explain": r.explain} if r.explain else {}),
+        **({"context": r.context} if r.context is not None else {}),
     }
 
 

@@ -227,3 +227,14 @@ class Store:
             (community_id,),
         ).fetchall()
         return [row[0] for row in rows]
+
+    def all_communities(self) -> dict[int, int]:
+        """chunk_id -> community_id for every chunk that has one (isolates are absent)."""
+        rows = self.conn.execute("SELECT chunk_id, community_id FROM communities").fetchall()
+        return dict(rows)
+
+    def community_of(self, chunk_id: int) -> int | None:
+        row = self.conn.execute(
+            "SELECT community_id FROM communities WHERE chunk_id = ?", (chunk_id,)
+        ).fetchone()
+        return row[0] if row else None

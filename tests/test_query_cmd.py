@@ -51,3 +51,31 @@ def test_old_no_flags_still_parse_and_warn(calls):
     assert "no such option" not in result.output.lower()
     assert "--no-expand is deprecated" in result.output
     assert calls["opts"].expand is False and calls["opts"].rerank is False
+
+
+def test_context_defaults_to_config_query_context_lines(calls):
+    runner.invoke(app, ["query", "dogs"])
+    assert (calls["opts"].before, calls["opts"].after) == (5, 5)  # query.context_lines default
+
+
+def test_context_flag_sets_both_sides(calls):
+    runner.invoke(app, ["query", "dogs", "-C", "2"])
+    assert (calls["opts"].before, calls["opts"].after) == (2, 2)
+
+
+def test_before_after_override_context(calls):
+    """Explicit -B/-A win over -C for their own side."""
+    runner.invoke(app, ["query", "dogs", "-C", "2", "-B", "7"])
+    assert (calls["opts"].before, calls["opts"].after) == (7, 2)
+
+
+def test_files_only_forces_context_off(calls):
+    """--files-only shows no text, so context lines are never read from disk."""
+    runner.invoke(app, ["query", "dogs", "--files-only", "-C", "3"])
+    assert (calls["opts"].before, calls["opts"].after) == (0, 0)
+
+
+def test_negative_context_fails_loud(calls):
+    result = runner.invoke(app, ["query", "dogs", "-B", "-1"])
+    assert result.exit_code == 2
+    assert "must be >= 0" in result.output

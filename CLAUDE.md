@@ -73,6 +73,8 @@ src/ragx/
     catalog.py     #   curated embedding/reranker catalog (tiers, prefixes) + spec detect
     lmstudio.py    #   `lms` CLI wrapper: find/download (`lms get --yes`)/`lms ls --json`;
                    #   LM Studio can't download plain safetensors — rerankers stay on HF
+    graph_export.py #  build_graph: ragx.graph.v1 payload for `web`; fails loud unless the
+                   #   index's stored edge_source is "subchunk" (see Flows)
   providers/       # base.py protocols (Embedder/Generator/Reranker); openai_compat.py;
                    # st_reranker.py; lmstudio_process.py (LM Studio autostart);
                    # llama_process.py (managed llama-server lifecycle) +
@@ -80,37 +82,50 @@ src/ragx/
                    # registry.py factories (env-var + api_key_env resolution)
   cli/             # thin shells only: app.py (init/status/config + registration),
                    # pipeline.py (index/query), inspect_cmd.py, eval_cmd.py, models_cmd.py
-                   # (recommend/download/configure models), doctor_cmd.py, output.py
-tests/             # 253 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
+                   # (recommend/download/configure models), doctor_cmd.py, web_cmd.py, output.py
+  web/             # second thin shell over ragx.core (MCP server is the planned third):
+                   # server.py (build_server: ThreadingHTTPServer + cached graph bytes),
+                   # handlers.py (routing), query_runner.py (lazy providers, lock-serialized
+                   # queries), static_files.py (path-traversal-safe static serving);
+                   # static/ (frontend-owned: index.html, JS/CSS, vendored sigma.js)
+tests/             # 295 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
 ```
 
 ## Flows
 
-**Index** (`ragx-cli index [--changed]`): discover files (include/exclude globs — defaults in
+**Index** (`ragx-cli index`): discover files (include/exclude globs — defaults in
 `core/corpus_globs.py`: source + text docs, minus lockfiles/requirements/build output — root .gitignore,
-skip node_modules/.venv/hidden/binaries/>2MB) → xxhash diff (`--changed` = incremental, default
-= full rebuild) → chunk (~800 tok target, chunks are exact byte slices, sub-100-char fragments
+skip node_modules/.venv/hidden/binaries/>2MB) → xxhash diff (incremental by default since 0.8.0;
+`--full` rebuilds everything; `--changed` is a deprecated no-op alias for the default) → chunk
+(~800 tok target, chunks are exact byte slices, sub-100-char fragments
 merge into neighbors) → embed batched → HNSW add → kNN edges per new chunk (k=8, cos ≥ 0.55)
 + recompute edge lists of pre-existing neighbors that appear in new lists.
-Experimental `graph.edge_source="subchunk"` (default `"chunk"`): chunks additionally split into
-~128-tok sentence-aligned sub-chunks, embedded separately (float32 blobs in the SQLite
+`graph.edge_source="subchunk"` (default since 2026-10-21; `"chunk"` is the opt-out): chunks
+additionally split into ~`subchunk_size_tokens`-tok (default 256) sentence-aligned sub-chunks,
+embedded separately (float32 blobs in the SQLite
 `subchunks` table, cascade-deleted with their chunk; NOT in the query-time HNSW); edge weight =
 max cos over sub-chunk pairs; edges with whole-chunk cos ≥ `graph.near_dup_sim` (0.9) dropped.
 Query side untouched. In subchunk mode `graph.k` means links per SUB-chunk (no per-chunk cap —
-edge budget scales with concept count; graph gets ~2.2x denser). The manifest guards
-`edge_source`/`subchunk_size_tokens` like the embedding model — `--changed` after a flip fails
-loud. Rationale + literature: `research/fine-grained-sub-chunk-edges-*.md`. MEASURED 2026-07-12
-(`.lab` experiments #10–#11): on the scoped notes eval corpus the dense concept graph at hops2
-TIES the tuned chunk-graph baseline (r@10 .923 / MRR .718 vs .717) at ~4.5x index embed cost —
-no win because the corpus's short single-topic chunks have no dilution headroom (near-dup guard
-pruned ~3 edges). hops3 + uncapped budget floods RERANK_CAP (candidates 643). Verdict: default
-stays `edge_source="chunk"`; subchunk is opt-in for corpora with long multi-concept chunks, and
-if used, drop traversal to hops=2. RE-MEASURED 2026-07-13 under BGE-M3: same tie (rerank MRR
-.7548 vs .755) at 2x index time / 2.24x edges — verdict stands across embedding models. That
-ablation also found that with tuned β=0 the pre-rerank shortlist beyond the RRF seeds is filled
-by an ascending-chunk-id tie-break (graph-only candidates all have vector=0), so graph/hops
-changes barely reach the reranker — latent design smell, see
+edge budget scales with concept count; graph gets ~1.4x denser at the 256-tok default). The
+manifest guards `edge_source`/`subchunk_size_tokens` like the embedding model — an incremental
+`index` after a flip fails loud, naming the old/new value; `index --full` rebuilds, or pin the
+old value in `ragx.toml`. Rationale + literature: `research/fine-grained-sub-chunk-edges-*.md`.
+MEASURED 2026-07-12 (`.lab` experiments #10–#11): on the scoped notes eval corpus the dense
+concept graph at hops2 TIES the tuned chunk-graph baseline (r@10 .923 / MRR .718 vs .717) at
+~4.5x index embed cost (128-tok sub-chunks) — no win because the corpus's short single-topic
+chunks have no dilution headroom (near-dup guard pruned ~3 edges). hops3 + uncapped budget
+floods RERANK_CAP (candidates 643). Verdict at the time: default stays `edge_source="chunk"`;
+subchunk opt-in, drop traversal to hops=2 if used. RE-MEASURED 2026-07-13 under BGE-M3: same tie
+(rerank MRR .7548 vs .755) at 2x index time / 2.24x edges (128-tok) — verdict stands across
+embedding models. That ablation also found that with tuned β=0 the pre-rerank shortlist beyond
+the RRF seeds is filled by an ascending-chunk-id tie-break (graph-only candidates all have
+vector=0), so graph/hops changes barely reach the reranker — latent design smell, see
 `research/bge-m3-subchunk-edge-ablation-2026-07-13-ties-again-and-beta-zero-shortlist-mechanism.md`.
+RE-VERDICT 2026-10-21 (`research/subchunk-size-sweep-2026-10-21-default-edge-source-subchunk-size-choice.md`):
+sweep of 64/96/128/192/256-tok sub-chunks ties `edge_source="chunk"` at every size on a second
+eval corpus — size choice is driven by cost, not quality. Default flipped to
+`edge_source="subchunk"`, `subchunk_size_tokens=256` (cheapest tying size: fewest edges,
+~2x index time vs ~2.8–4.7x at 128/64-tok).
 
 **Query** (`ragx-cli query "..."`): optional expansion (1 LLM call, strict-JSON parse, graceful
 no-op on failure) → embed all variants, HNSW top-20 each → RRF merge = seeds → heat propagation
@@ -120,10 +135,18 @@ frontier ≤ 150) → cross-encoder rerank of top-100 shortlist → final =
 stage is off). Since 0.8.0 expansion and rerank are OPT-IN (`--expand`/`--rerank`;
 `QueryOptions` defaults expand=False, rerank=False; `--no-expand/--no-rerank` are hidden
 deprecated no-ops); graph stays on, `--no-graph` skips it. Output is folded per file
-(`core/grouping.py`, schema `ragx.query.v2`): walk ranked chunks until `top` (default 20)
+(`core/grouping.py`, schema `ragx.query.v3`): walk ranked chunks until `top` (default 20)
 distinct files are seen, each file keeps its ≤3 chunks inside that window, entry score = their
 sum. The window is load-bearing — summing ALL candidates let weak graph-neighbour chunks pad
 files (graph MRR .43 → .38; windowed .65). `--files-only` = same entries, no text; `--explain` attaches seed→parent→edge_weight→hop traces.
+Each result chunk also carries grep-style `-B`/`-A`/`-C` context lines (`core/context.py`,
+`query.context_lines=5` default, counts non-empty lines only); `--files-only` skips the file
+reads since no text is shown.
+
+**Web** (`ragx-cli web`): builds the `ragx.graph.v1` payload once at startup (`graph_export.py`
+— requires the index's stored `edge_source` to be `"subchunk"`, fails loud otherwise) and serves
+it plus `/api/chunk/{id}` and `/api/query` (same pipeline as `query`, providers built lazily and
+cached, one query at a time behind a lock) over stdlib `http.server`.
 
 ## State & benchmarks (as of 2026-07-10)
 
@@ -169,7 +192,8 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 - Phase 4 (plan §5): Leiden community creation is DONE (index-time, `communities.py`,
   read-only via `status`/`inspect communities`/`inspect community`). Remaining: community
   labels, `query --global` for corpus-level questions.
-- Phase 5: MCP server as a second thin shell over `ragx.core` (split already enforced).
+- Phase 5: MCP server as a third thin shell over `ragx.core` (split already enforced; `web/`
+  is the second, see Layout/Flows).
 - Temporal weighting: full decided spec in `docs/feature-temporal-weighting.md` — opt-in
   `--since/--until/--temporal recent|oldest`, date cascade filename/frontmatter → git → mtime,
   schema v2 migration. Build only after it can be measured against the eval baseline.
@@ -177,7 +201,7 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 
 ## Dev loop
 
-`uv sync --group dev --extra rerank` · `uv run pytest -q` (253 pass, ~5 s) ·
+`uv sync --group dev --extra rerank` · `uv run pytest -q` (295 pass, ~7 s) ·
 `uv run ruff check src tests` · file soft cap ~150 lines · expected failures raise `RagxError`
 (CLI maps to exit 2). Live smoke: LM Studio must be running with the configured embedding model.
 Changes that impact usage (CLI flags, config keys/precedence, output schemas, install steps)

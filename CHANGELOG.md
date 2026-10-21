@@ -4,6 +4,30 @@ All notable changes to `ragx-cli` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `ragx-cli web [--host] [--port] [--open/--no-open]` — serves an interactive graph view
+  (nodes/edges/communities) plus a query box over plain `http.server`. Requires an index built
+  with `graph.edge_source = "subchunk"`.
+- Grep-style `-B`/`-A`/`-C` context lines on `ragx-cli query` results (`query.context_lines`,
+  default 5), and `explain.path` (the seed→parent chain) in `--explain` output.
+- `ragx.query.v3` schema (breaking): adds the `context` and `explain.path` fields to each result
+  chunk.
+
+### Changed
+
+- **`graph.edge_source` defaults to `"subchunk"` (was `"chunk"`); `graph.subchunk_size_tokens`
+  defaults to 256 (was 128). Breaking: an index built under the old defaults mismatches the
+  manifest — `ragx-cli index --full` rebuilds it, or pin `graph.edge_source = "chunk"` /
+  `graph.subchunk_size_tokens = 128` in `ragx.toml` to keep it.** A corpus whose `ragx.toml` was
+  written by `ragx-cli init` already pins both keys explicitly and is unaffected; only a
+  hand-written `ragx.toml` missing them picks up the new default. `ragx-cli query` is unaffected
+  either way — it doesn't read sub-chunk data. Measured tie with `"chunk"` on the scoped notes eval corpus;
+  256 chosen as the cheapest size that ties:
+  `research/subchunk-size-sweep-2026-10-21-default-edge-source-subchunk-size-choice.md`.
+
 ## [0.8.0] — 2026-10-20
 
 ### Changed

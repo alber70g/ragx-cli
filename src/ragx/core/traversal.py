@@ -66,3 +66,25 @@ def propagate_heat(
         frontier = sorted(improved, key=lambda n: (-heat[n], n))[:max_frontier]
 
     return TraversalResult(heat=heat, trace=trace)
+
+
+def trace_path(trace: dict[int, dict], node: int) -> list[int]:
+    """Walk `trace[node]["parent"]` links back to the seed, returning node ids
+    seed-first (`[seed, ..., node]`). Heat strictly decreases along parent links
+    (contribution = heat[u] * w * decay, w <= 1, decay < 1), so cycles can't occur;
+    a visited-set guard stops anyway rather than raising."""
+    path = [node]
+    visited = {node}
+    current = node
+    while True:
+        entry = trace.get(current)
+        if entry is None or entry["parent"] is None:
+            break
+        parent = entry["parent"]
+        if parent in visited:
+            break
+        path.append(parent)
+        visited.add(parent)
+        current = parent
+    path.reverse()
+    return path

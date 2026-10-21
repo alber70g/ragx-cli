@@ -78,17 +78,28 @@ def query(
     ),
     hops: int | None = typer.Option(None, "--hops"),
     explain: bool = typer.Option(False, "--explain"),
+    before: int | None = typer.Option(None, "-B", "--before", help="context lines before each chunk"),
+    after: int | None = typer.Option(None, "-A", "--after", help="context lines after each chunk"),
+    context: int | None = typer.Option(None, "-C", "--context", help="context lines on both sides"),
 ) -> None:
     """Search the index: one entry per file with its best chunks (paths only with --files-only)."""
     for flag, used in (("--no-expand", no_expand), ("--no-rerank", no_rerank)):
         if used:
             print(f"warning: {flag} is deprecated; that stage is now off by default", file=sys.stderr)
+    for flag, val in (("-B/--before", before), ("-A/--after", after), ("-C/--context", context)):
+        if val is not None and val < 0:
+            fail(f"{flag} must be >= 0")
     if text == "-":
         text = sys.stdin.read().strip()
     try:
         root = require_root()
         cfg = Config.load(root, confirm=migrate_confirm())
         lmstudio_process.ensure_for_section(cfg, "embeddings")
+        default_lines = context if context is not None else cfg.get("query.context_lines")
+        before_lines = before if before is not None else default_lines
+        after_lines = after if after is not None else default_lines
+        if files_only:
+            before_lines = after_lines = 0  # not shown; skip the file reads
         opts = QueryOptions(
             top=top if top is not None else cfg.get("query.top"),
             files_only=files_only,
@@ -97,6 +108,8 @@ def query(
             rerank=rerank,
             hops=hops,
             explain=explain,
+            before=before_lines,
+            after=after_lines,
         )
         out = run_query(
             root, cfg, make_embedder(cfg), text, opts,
@@ -120,5 +133,15 @@ def query(
                 lines = f"{r.chunk.line_start}-{r.chunk.line_end}"
                 first_line = r.chunk.text.strip().splitlines()[0][:90] if r.chunk.text.strip() else ""
                 typer.echo(f"        {r.score:.4f}  {lines:<9}  {first_line}")
+                if r.context:
+                    _echo_context(r.context.get("before"))
+                    _echo_context(r.context.get("after"))
     if not out.results:
         raise typer.Exit(code=1)
+
+
+def _echo_context(span: dict | None) -> None:
+    if not span:
+        return
+    for offset, line in enumerate(span["text"].split("\n")):
+        typer.echo(f"        {span['line_start'] + offset}-  {line}")

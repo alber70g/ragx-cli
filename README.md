@@ -61,21 +61,26 @@ embedded, and stored in an HNSW index. The similarity graph then falls out almos
 one kNN pass over the vectors that are already in memory — each chunk gets edges to its top-k
 nearest neighbors above a similarity floor.
 
-Experimental: `graph.edge_source = "subchunk"` derives edge weights from sentence-aligned
+`graph.edge_source = "subchunk"` (default) derives edge weights from sentence-aligned
 **sub-chunks** instead of whole-chunk cosine — each chunk is split into ~`subchunk_size_tokens`
-windows, embedded separately (stored in SQLite, never in the query-time HNSW), and the edge
-weight between two chunks becomes the *max* similarity over their sub-chunk pairs, so a chunk
-mixing several concepts gets one sharp edge per concept instead of a diluted average. Edges
+(256) token windows, embedded separately (stored in SQLite, never in the query-time HNSW), and
+the edge weight between two chunks becomes the *max* similarity over their sub-chunk pairs, so a
+chunk mixing several concepts gets one sharp edge per concept instead of a diluted average. Edges
 between near-duplicate chunks (whole-chunk cosine ≥ `near_dup_sim`) are dropped — those are the
-measured precision-killers. Costs roughly 5–10× more embedding calls at index time; retrieval
-units, traversal, and query flow are unchanged. Switching `edge_source` (or the sub-chunk size)
-requires `index --full`; incremental runs fail loud on the mismatch. Literature grounding:
+measured precision-killers. Costs ~2× more embedding calls at index time than `edge_source =
+"chunk"`; retrieval units, traversal, and query flow are unchanged. Switching `edge_source` (or
+the sub-chunk size) requires `index --full`; incremental runs fail loud on the mismatch, naming
+the old/new value and the fix. Literature grounding:
 `research/fine-grained-sub-chunk-edges-with-coarse-chunk-nodes-multi-granularity-graph-rag-literature-validation.md`.
 In this mode `k` counts links per *sub-chunk* with no per-chunk cap, so the graph is denser and
-shallower traversal suffices. Measured on the tuned eval corpus (2026-07): at `hops=2` it ties
-the chunk-edge baseline exactly (same recall, same MRR) at ~4.5× the indexing cost — that
-corpus's short, single-topic chunks leave no concept-dilution headroom to exploit. Worth trying
-only on corpora with long, genuinely multi-concept chunks (use `hops=2`); the default stays `"chunk"`.
+shallower traversal suffices (the default `hops=2` already matches this). Quality ties
+`edge_source="chunk"` exactly at every sub-chunk size tried, 64–256 tokens (2026-07 and
+2026-10-21 sweeps); the corpora measured so far have short, single-topic chunks with no
+concept-dilution headroom to exploit. `256` is the default because it's the cheapest size that
+ties — fewest edges, ~2× index time vs ~2.8–4.7× at 128/64 tokens. Set `graph.edge_source =
+"chunk"` back if a corpus's long, genuinely multi-concept chunks make the extra edges worth the
+cost — no corpus has measured a win yet. Sweep data:
+`research/subchunk-size-sweep-2026-10-21-default-edge-source-subchunk-size-choice.md`.
 
 After edge construction, a Leiden partition (`graspologic-native`, seeded, deterministic) is
 computed over the whole edge list every index run and stored read-only — see
@@ -96,15 +101,33 @@ flowchart TD
 re-embeds only new/modified files, drops deleted ones, and repairs only the edge lists those
 chunks touch. Content hashes make `touch`-ed but unchanged files free, and include/exclude glob
 changes converge to the same file set a rebuild would produce. `--full` rebuilds from scratch;
-changing `embeddings.model`, `chunking.*`, or `graph.edge_source` requires it — incremental runs
-fail loud on the manifest mismatch. `ragx-cli status` reports **drift** (files new/changed/deleted
-since the last index) so you can see when a re-index is due without running one.
+changing `embeddings.model`, `chunking.*`, or `graph.edge_source`/`subchunk_size_tokens` requires
+it — incremental runs fail loud on the manifest mismatch, naming the changed key and its old/new
+value. `ragx-cli status` reports **drift** (files new/changed/deleted since the last index) so
+you can see when a re-index is due without running one.
+
+Upgrading from an older `ragx-cli` after a default change (e.g. the `graph.edge_source` flip to
+`"subchunk"`): `ragx-cli init` always writes every `[graph]` key explicitly into `ragx.toml`
+(`Config.save` bakes the full default set, not just overrides), so an init-created corpus already
+pins its `edge_source`/`subchunk_size_tokens` and is unaffected by a later default change. Only a
+hand-written `ragx.toml` missing those keys picks up the new default; its next incremental
+`index` then fails loud — `index --full` rebuilds, or pin the old value back in `ragx.toml`.
 
 ### Querying
 
 A default query runs vector search + graph traversal: no LLM call, no cross-encoder.
 Expansion (`--expand`) and rerank (`--rerank`) are opt-in; `--no-graph` skips traversal,
 which leaves pure vector search. Callers trade latency for quality per query.
+
+Every result chunk also comes with grep-style `-B`/`-A`/`-C` context lines, on by default
+(`query.context_lines=5` on each side). `-B/--before N` and `-A/--after N` set each side
+independently; `-C/--context N` sets both; explicit `-B`/`-A` win over `-C`, which wins over
+the default. Counting rule: `N` counts **non-empty** lines walking outward from the chunk —
+blank lines don't count toward `N` but are kept in the returned span if they fall between the
+chunk and the Nth non-empty line; the span stops exactly at that line, so blank lines beyond it
+are excluded. `N=0` disables that side; fewer than `N` non-empty lines in the file returns what
+exists; none returns `null`. Context is read fresh from disk at query time, never truncated by
+`query.max_chunk_chars`, and `--files-only` skips it (no file reads, since the text isn't shown).
 
 Results are **one entry per file**. The pipeline ranks chunks, walks that list until it has
 seen `--top` distinct files (default `query.top = 20`), and folds each file's chunks inside
@@ -145,7 +168,10 @@ flowchart LR
 ```
 
 Because every admitted chunk records which seed and edge produced it, `--explain` can print the
-full justification: *seed → edge(weight) → chunk*, per result.
+full justification: *seed → edge(weight) → chunk*, per result. The explain object also carries
+`path`: the seed-first chain of chunk ids along the traversal's own parent links
+(`[seed, ..., chunk_id]`), so a UI can highlight the exact path the traversal took instead of
+guessing a shortest path through the graph.
 
 ---
 
@@ -414,16 +440,51 @@ section with `ragx-cli config set embeddings.autostart false` (or machine-wide v
 `ragx-cli models` still only downloads models and writes `ragx.toml`; it never launches
 anything. If a run dies with "connection refused", `doctor` names the stage and the fix.
 
+## Browsing the graph: `ragx-cli web`
+
+`ragx-cli web` serves an interactive view of the chunk graph plus a query box, over plain
+`http.server` (no web framework, no build step for the backend):
+
+```
+ragx-cli web [--host 127.0.0.1] [--port 8765] [--open/--no-open]
+```
+
+Requires an index built with `graph.edge_source = "subchunk"` (the default) — the graph view
+renders stored edge weights as sub-chunk similarity, and a `"chunk"`-mode index's whole-chunk
+cosine weights would mislabel what the edges mean. Fails loud (exit 2) naming the mismatch, or
+when no index exists yet. `--open` (default) launches the browser; Ctrl-C shuts the server down
+cleanly.
+
+Endpoints (JSON; errors are `{"error": "<message>"}`):
+
+- `GET /` and `GET /static/<path>` — the viewer's static assets.
+- `GET /api/graph` — `ragx.graph.v1`: `meta` (root, edge_source, subchunk_size_tokens,
+  embedding_model, nodes/edges/communities counts), `nodes` (id, file, line_start/line_end,
+  label, community, degree), `edges` (`[src, dst, weight]`). Built once at startup, cached,
+  gzip-encoded when the request sends `Accept-Encoding: gzip`.
+- `GET /api/chunk/{id}` — a chunk's file/lines/text/community plus its neighbors
+  (`{chunk_id, weight}`, weight descending). 404 for an unknown id.
+- `POST /api/query` — body `{"text", "top", "expand", "graph", "rerank", "hops", "explain",
+  "before", "after"}` (only `text` required; the rest default like `ragx-cli query`). Returns
+  `ragx.query.v3` (same shape as `--json` query output) plus `elapsed_ms`. 400 on a malformed
+  body, 502 when the query pipeline raises (backend down, manifest mismatch).
+
+Providers (embedder, reranker, expansion LLM) are built lazily on first use of their stage and
+cached for the server's lifetime; queries run one at a time behind a lock.
+
 ## Agent-first conventions
 
-- `--json` emits exactly one JSON document on stdout (versioned schemas: `ragx.query.v2`,
+- `--json` emits exactly one JSON document on stdout (versioned schemas: `ragx.query.v3`,
   `ragx.files.v1`, `ragx.status.v1`, `ragx.doctor.v1`, `ragx.eval.v1`, `ragx.inspect.*.v1`); logs go
   to stderr.
 - Exit codes: `0` results, `1` success-but-empty, `2` error.
-- `ragx.query.v2` results are one entry per file: `{file, score, chunks: [...]}`. Each chunk
+- `ragx.query.v3` results are one entry per file: `{file, score, chunks: [...]}`. Each chunk
   carries `chunk_id`, `line_start/line_end`, `byte_start/byte_end`, `score`, `breakdown`, `text`,
   `truncated` — agents jump to the exact source location and read the full text themselves
   (JSON chunk text is truncated). v1 (one flat entry per chunk) is gone since 0.8.0.
+- Each chunk also carries `context: {before, after}` (grep-style `-B`/`-A` lines, default 5
+  each; see [Querying](#querying)) — each side is `{line_start, line_end, text}` or `null`.
+  The key is omitted entirely when both `--before`/`-B` and `--after`/`-A` are 0.
 - `--files-only` returns the same entries without text (`file`, `score`, `chunk_ids`) — the
   mode coding agents use most.
 - `ragx-cli status` includes a `drift` object (`new`/`changed`/`deleted` file counts vs the index) —
@@ -609,7 +670,7 @@ Key defaults:
 |---|---|
 | `[corpus]` | `include` = source code (`*.py`, `*.ts`, `*.go`, `*.rs`, … ~70 extensions, plus `Dockerfile`/`Makefile`) and text docs (`*.md`, `*.mdx`, `*.rst`, `*.txt`, `*.adoc`, `*.org`); `exclude` = lockfiles (`*.lock`, `package-lock.json`, `pnpm-lock.yaml`, `go.sum`, …), `requirements*.txt`/`constraints*.txt`, `LICENSE*`/`COPYING*`, `*.min.js`/`*.min.css`/`*.map`, and `dist/`, `build/`, `target/`, `coverage/`, `vendor/`; `respect_gitignore=true`. Full lists: `src/ragx/core/corpus_globs.py`. Existing `ragx.toml` files keep their own lists |
 | `[chunking]` | `size_tokens=800`, `overlap=0.15` |
-| `[graph]` | `k=8`, `min_edge_sim=0.55`, `edge_source="chunk"`, `subchunk_size_tokens=128`, `near_dup_sim=0.9` |
+| `[graph]` | `k=8`, `min_edge_sim=0.55`, `edge_source="subchunk"`, `subchunk_size_tokens=256`, `near_dup_sim=0.9` |
 | `[traversal]` | `hops=2`, `decay=0.5`, `query_floor=0.35`, `max_frontier=150` |
 | `[communities]` | `resolution=1.0`, `seed=42` — recomputed every index run; changing these never invalidates the index |
 | `[fusion]` | `rrf_k=60`, `per_query_top=20` |
@@ -617,6 +678,7 @@ Key defaults:
 | `[embeddings]` | `provider="openai"`, `base_url="http://localhost:1234/v1"`, prefixes for nomic-style models, `api_key_env=""`, `autostart=true` (start LM Studio + load the model when the URL is local) |
 | `[expansion]` | optional LLM for multi-query/HyDE; reasoning models supported (4096-token budget); `api_key_env=""`, `autostart=true` |
 | `[rerank]` | `BAAI/bge-reranker-v2-m3` via sentence-transformers (`uv tool install 'ragx-cli[rerank]'`) |
+| `[query]` | `top=20`, `max_chunk_chars=1200`, `context_lines=5` (default for `-B`/`-A`/`-C`) |
 
 ## Features & roadmap
 
@@ -631,9 +693,10 @@ unchecked ones are next up. Release history: [CHANGELOG.md](CHANGELOG.md).
 - [x] **Interactive `init`**: LM Studio/Ollama server + model detection, guided embeddings/expansion/corpus setup (`--yes` for defaults)
 - [x] **Committable config**: `ragx.toml` at the corpus root (0.3.0; was `.ragx/config.toml`), index data stays gitignored in `.ragx/`
 - [x] **Offline-friendly rerank**: graceful degradation + pre-seeding docs when huggingface.co is unreachable
-- [x] **Sub-chunk edges** (opt-in `graph.edge_source="subchunk"`): edge weight = max cosine over sentence-aligned sub-chunk pairs, for corpora with long multi-concept chunks
+- [x] **Sub-chunk edges** (default since the 2026-10-21 default flip; `graph.edge_source="subchunk"`): edge weight = max cosine over sentence-aligned sub-chunk pairs, for corpora with long multi-concept chunks; set `graph.edge_source="chunk"` for the whole-chunk-cosine alternative
 - [x] **Incremental by default** (0.4.0): `index` hash-diffs, `--full` rebuilds, `status` reports corpus drift, chunking params are manifest-guarded
 - [x] **`ragx-cli models`**: curated embedding/reranker recommendation (quality tier + RAM detection), downloads via LM Studio's `lms get`, serving via llama-server or LM Studio
+- [x] **`ragx-cli web`**: interactive sub-chunk graph viewer + query UI over stdlib `http.server`
 - [ ] **Community labels**: name the Leiden communities so they're browsable without reading member chunks
 - [ ] **query --global** for corpus-level questions (answer from community summaries, not individual chunks)
 - [ ] **MCP server**: a second thin shell over `ragx.core` (the core/CLI split it needs is already enforced)
