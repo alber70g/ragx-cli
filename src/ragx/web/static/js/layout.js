@@ -63,6 +63,7 @@ export function savePositions(graph, key) {
 function settingsFor(graph) {
   const settings = FA2.inferSettings(graph);
   settings.barnesHutOptimize = graph.order > 2000;
+  settings.edgeWeightInfluence = 1; // edge `weight` (similarity) pulls stronger links closer
   return settings;
 }
 

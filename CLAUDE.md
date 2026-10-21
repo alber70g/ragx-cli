@@ -73,8 +73,10 @@ src/ragx/
     catalog.py     #   curated embedding/reranker catalog (tiers, prefixes) + spec detect
     lmstudio.py    #   `lms` CLI wrapper: find/download (`lms get --yes`)/`lms ls --json`;
                    #   LM Studio can't download plain safetensors — rerankers stay on HF
-    graph_export.py #  build_graph: ragx.graph.v1 payload for `web`; fails loud unless the
-                   #   index's stored edge_source is "subchunk" (see Flows)
+    graph_export.py #  build_graph: ragx.graph.v1 payload for `web`; renders whatever edges the
+                   #   index has, subchunk or chunk-mode cosine (see Flows)
+    reedge.py      #   rebuild_edges: `index --edges-only` — rebuilds sub-chunks/edges/
+                   #   communities from stored chunks, no re-chunk/re-embed (see Flows)
   providers/       # base.py protocols (Embedder/Generator/Reranker); openai_compat.py;
                    # st_reranker.py; lmstudio_process.py (LM Studio autostart);
                    # llama_process.py (managed llama-server lifecycle) +
@@ -88,7 +90,7 @@ src/ragx/
                    # handlers.py (routing), query_runner.py (lazy providers, lock-serialized
                    # queries), static_files.py (path-traversal-safe static serving);
                    # static/ (frontend-owned: index.html, JS/CSS, vendored sigma.js)
-tests/             # 295 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
+tests/             # 301 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
 ```
 
 ## Flows
@@ -108,8 +110,10 @@ max cos over sub-chunk pairs; edges with whole-chunk cos ≥ `graph.near_dup_sim
 Query side untouched. In subchunk mode `graph.k` means links per SUB-chunk (no per-chunk cap —
 edge budget scales with concept count; graph gets ~1.4x denser at the 256-tok default). The
 manifest guards `edge_source`/`subchunk_size_tokens` like the embedding model — an incremental
-`index` after a flip fails loud, naming the old/new value; `index --full` rebuilds, or pin the
-old value in `ragx.toml`. Rationale + literature: `research/fine-grained-sub-chunk-edges-*.md`.
+`index` after a flip fails loud, naming the old/new value; `index --edges-only` (`core/reedge.py`)
+rebuilds just sub-chunks/edges/communities from the stored chunks — no re-chunk/re-embed, reusing
+each whole chunk's stored vector — or `index --full` rebuilds everything, or pin the old value in
+`ragx.toml`. Rationale + literature: `research/fine-grained-sub-chunk-edges-*.md`.
 MEASURED 2026-07-12 (`.lab` experiments #10–#11): on the scoped notes eval corpus the dense
 concept graph at hops2 TIES the tuned chunk-graph baseline (r@10 .923 / MRR .718 vs .717) at
 ~4.5x index embed cost (128-tok sub-chunks) — no win because the corpus's short single-topic
@@ -144,9 +148,9 @@ Each result chunk also carries grep-style `-B`/`-A`/`-C` context lines (`core/co
 reads since no text is shown.
 
 **Web** (`ragx-cli web`): builds the `ragx.graph.v1` payload once at startup (`graph_export.py`
-— requires the index's stored `edge_source` to be `"subchunk"`, fails loud otherwise) and serves
-it plus `/api/chunk/{id}` and `/api/query` (same pipeline as `query`, providers built lazily and
-cached, one query at a time behind a lock) over stdlib `http.server`.
+— renders the index's stored edges, sub-chunk or chunk-mode cosine; fails loud only when no
+index exists) and serves it plus `/api/chunk/{id}` and `/api/query` (same pipeline as `query`,
+providers built lazily and cached, one query at a time behind a lock) over stdlib `http.server`.
 
 ## State & benchmarks (as of 2026-07-10)
 
@@ -201,7 +205,7 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 
 ## Dev loop
 
-`uv sync --group dev --extra rerank` · `uv run pytest -q` (295 pass, ~7 s) ·
+`uv sync --group dev --extra rerank` · `uv run pytest -q` (300 pass + 1 skipped, ~9 s) ·
 `uv run ruff check src tests` · file soft cap ~150 lines · expected failures raise `RagxError`
 (CLI maps to exit 2). Live smoke: LM Studio must be running with the configured embedding model.
 Changes that impact usage (CLI flags, config keys/precedence, output schemas, install steps)

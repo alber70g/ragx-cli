@@ -12,6 +12,7 @@ from ragx.core.config import Config, require_root
 from ragx.core.errors import RagxError
 from ragx.core.indexer import run_index
 from ragx.core.query import QueryOptions, run_query, to_files_json, to_query_json
+from ragx.core.reedge import rebuild_edges
 from ragx.providers import lmstudio_process
 from ragx.providers.registry import make_embedder, make_generator, make_reranker
 
@@ -24,6 +25,12 @@ def register(app: typer.Typer) -> None:
 def index(
     path: Path | None = typer.Argument(None),
     full: bool = typer.Option(False, "--full", help="full rebuild: re-chunk and re-embed everything"),
+    edges_only: bool = typer.Option(
+        False,
+        "--edges-only",
+        help="rebuild sub-chunks, graph edges and communities from the stored chunks per "
+        "the current [graph] config; chunk embeddings and the vector index are kept",
+    ),
     changed: bool = typer.Option(
         False, "--changed", hidden=True, help="deprecated: incremental is now the default"
     ),
@@ -32,13 +39,20 @@ def index(
     """Chunk, embed, and index the corpus (incremental by default; --full rebuilds)."""
     if changed and full:
         fail("--changed and --full are mutually exclusive")
+    if edges_only and full:
+        fail("--edges-only and --full are mutually exclusive")
+    if edges_only and changed:
+        fail("--edges-only and --changed are mutually exclusive")
     if changed:
         print("warning: --changed is deprecated; incremental is now the default", file=sys.stderr)
     try:
         root = require_root(path)
         cfg = Config.load(root, confirm=migrate_confirm())
         lmstudio_process.ensure_for_section(cfg, "embeddings")
-        stats = run_index(root, cfg, make_embedder(cfg), full=full)
+        if edges_only:
+            stats = rebuild_edges(root, cfg, make_embedder(cfg))
+        else:
+            stats = run_index(root, cfg, make_embedder(cfg), full=full)
     except RagxError as exc:
         fail(str(exc))
     doc = {"schema": "ragx.index.v1", **stats.__dict__}

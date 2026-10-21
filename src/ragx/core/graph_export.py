@@ -1,14 +1,13 @@
 """Builds the ragx.graph.v1 payload (nodes/edges/communities) for `ragx-cli web`.
 
-Requires an index built with graph.edge_source="subchunk": the viewer renders the
-stored edge weights as sub-chunk similarity, and a whole-chunk-cosine graph (edge_source
-="chunk") would mislabel those edges as concept-level links they aren't."""
+Renders whatever edges the index has: sub-chunk similarity when it was built with
+graph.edge_source="subchunk", whole-chunk cosine when edge_source="chunk". An index with
+zero edges (nodes only) is valid — the viewer just shows an unconnected cloud."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from ragx.core.errors import RagxError
 from ragx.core.store import Store
 
 LABEL_MAX_CHARS = 80
@@ -16,12 +15,7 @@ LABEL_MAX_CHARS = 80
 
 def build_graph(root: Path, store: Store) -> dict:
     edge_source = store.get_meta("edge_source")
-    if edge_source != "subchunk":
-        raise RagxError(
-            "ragx-cli web shows sub-chunk edges, but this index was built with "
-            f'edge_source="{edge_source}". Set graph.edge_source = "subchunk" in '
-            "ragx.toml and run ragx-cli index."
-        )
+    sub_size = store.get_meta("subchunk_size_tokens")
 
     chunks = store.get_chunks(store.all_chunk_ids())
     edges = store.all_edges()
@@ -51,7 +45,7 @@ def build_graph(root: Path, store: Store) -> dict:
         "meta": {
             "root": root.name,
             "edge_source": edge_source,
-            "subchunk_size_tokens": int(store.get_meta("subchunk_size_tokens") or 0),
+            "subchunk_size_tokens": int(sub_size) if edge_source == "subchunk" and sub_size else None,
             "embedding_model": store.get_meta("embedding_model"),
             "nodes": len(nodes),
             "edges": len(edge_list),

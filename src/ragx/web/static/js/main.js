@@ -23,12 +23,15 @@ function showPanel(nodes) {
 }
 
 function renderMeta(meta) {
+  const edgeSource = meta.edge_source === "subchunk"
+    ? `subchunk (${meta.subchunk_size_tokens} tok)`
+    : "chunk (whole-chunk cosine)";
   const items = [
     ["corpus", meta.root],
     ["chunks", fmtInt(meta.nodes)],
     ["edges", fmtInt(meta.edges)],
     ["communities", fmtInt(meta.communities)],
-    ["edge source", `${meta.edge_source} (${meta.subchunk_size_tokens} tok)`],
+    ["edge source", edgeSource],
     ["embedding", meta.embedding_model],
   ];
   $("#meta").replaceChildren(...items.map(([k, v]) =>

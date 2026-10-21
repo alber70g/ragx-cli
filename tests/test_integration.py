@@ -241,6 +241,7 @@ def test_incremental_fails_loud_on_edge_source_flip(tmp_path):
     assert "edge_source" in message
     assert "'chunk'" in message and "'subchunk'" in message
     assert "--full" in message
+    assert "--edges-only" in message
     stats = run_index(tmp_path, cfg, emb, full=True)  # explicit rebuild clears the mismatch
     assert stats.files_indexed == 3
 

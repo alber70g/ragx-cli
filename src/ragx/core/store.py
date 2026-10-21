@@ -166,6 +166,10 @@ class Store:
             "SELECT chunk_id, vector FROM subchunks ORDER BY chunk_id, id"
         ).fetchall()
 
+    def clear_subchunks(self) -> None:
+        self.conn.execute("DELETE FROM subchunks")
+        self.conn.commit()
+
     # -- edges (undirected; stored normalized src < dst) -----------------
 
     def replace_edges(self, src: int, neighbors: Sequence[tuple[int, float]]) -> None:
@@ -198,6 +202,10 @@ class Store:
 
     def edge_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+
+    def clear_edges(self) -> None:
+        self.conn.execute("DELETE FROM edges")
+        self.conn.commit()
 
     def all_edges(self) -> list[tuple[int, int, float]]:
         return self.conn.execute("SELECT src, dst, weight FROM edges ORDER BY src, dst").fetchall()

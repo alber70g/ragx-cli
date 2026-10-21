@@ -251,6 +251,20 @@ def test_index_changed_and_full_mutually_exclusive(tmp_path, monkeypatch):
     assert result.exit_code == 2
 
 
+def test_index_edges_only_and_full_mutually_exclusive(tmp_path, monkeypatch):
+    runner.invoke(app, ["init", str(tmp_path)])
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["index", "--edges-only", "--full"])
+    assert result.exit_code == 2
+
+
+def test_index_edges_only_and_changed_mutually_exclusive(tmp_path, monkeypatch):
+    runner.invoke(app, ["init", str(tmp_path)])
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["index", "--edges-only", "--changed"])
+    assert result.exit_code == 2
+
+
 def test_status_without_init(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["status"])

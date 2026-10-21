@@ -4,6 +4,29 @@ All notable changes to `ragx-cli` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `ragx-cli index --edges-only` — rebuilds sub-chunks, graph edges and communities from the
+  stored chunks per the current `[graph]` config, without re-chunking or re-embedding files.
+  Lets an existing index switch `graph.edge_source` (or `subchunk_size_tokens`) cheaply: chunk
+  embeddings and the vector index are kept; a chunk that stays whole reuses its own stored
+  vector, so only the sub-chunk pieces a split chunk actually produces go through the embedder.
+  Mutually exclusive with `--full`/`--changed`. The incremental-index manifest mismatch message
+  for `edge_source`/`subchunk_size_tokens` now also suggests `--edges-only`.
+
+### Changed
+
+- `ragx-cli web` no longer requires an index built with `graph.edge_source = "subchunk"`: it
+  renders whatever edges the index has — sub-chunk similarity when the index has them, otherwise
+  the stored whole-chunk cosine edges. An index with zero edges renders as a node-only cloud.
+
+### Fixed
+
+- `ragx-cli web` layout: ForceAtlas2 now uses edge weights (`edgeWeightInfluence = 1`), so more
+  similar chunks sit closer together. Before, every edge pulled equally.
+
 ## [0.9.0] — 2026-10-21
 
 ### Added

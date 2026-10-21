@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
 from ragx.core.config import Config, write_default_config
-from ragx.core.errors import RagxError
 from ragx.core.graph_export import build_graph
 from ragx.core.indexer import run_index
 from ragx.core.store import Store
@@ -65,18 +62,22 @@ def test_build_graph_node_fields_and_degree(tmp_path):
     assert 0.0 <= weight <= 1.0
 
 
-def test_build_graph_refuses_chunk_mode_index_because_edges_would_misrepresent_subchunk_similarity(
-    tmp_path,
-):
-    # Index built with edge_source="chunk": its edge weights are whole-chunk
-    # cosine, not sub-chunk similarity. Rendering them as a sub-chunk graph would show
-    # edges that don't mean what the viewer's weight scale claims.
+def test_build_graph_exports_chunk_mode_index_with_whole_chunk_edges(tmp_path):
+    # Index built with edge_source="chunk": no sub-chunks exist, so the graph must render
+    # the stored whole-chunk-cosine edges instead of refusing.
     make_corpus(tmp_path)
+    (tmp_path / "pets2.md").write_text("# More pets\n\nDogs bark at cats. Cats purr at dogs.\n")
     write_default_config(tmp_path)
     cfg = Config.load(tmp_path)
     cfg.set("graph.edge_source", "chunk")
-    run_index(tmp_path, cfg, FakeEmbedder())
+    cfg.set("graph.min_edge_sim", "0.3")  # fake embeddings are coarse
+    stats = run_index(tmp_path, cfg, FakeEmbedder())
+    assert stats.edges_total > 0
 
     with Store(db_path(tmp_path)) as store:
-        with pytest.raises(RagxError, match='edge_source="chunk"'):
-            build_graph(tmp_path, store)
+        graph = build_graph(tmp_path, store)
+        assert graph["meta"]["edge_source"] == "chunk"
+        assert graph["meta"]["subchunk_size_tokens"] is None
+        assert graph["edges"] == [
+            [src, dst, round(weight, 4)] for src, dst, weight in store.all_edges()
+        ]

@@ -35,6 +35,7 @@ ragx-cli query "..." --json --rerank            # higher precision: cross-encode
 echo "..." | ragx-cli query - --json            # long/multiline query from stdin
 ragx-cli index                  # incremental reindex (hash-based, cheap) — the default
 ragx-cli index --full           # full rebuild: re-chunks + re-embeds everything
+ragx-cli index --edges-only     # rebuild sub-chunks/edges/communities only; keeps embeddings
 ```
 
 Other query flags: `--expand` (one LLM call: multi-query + HyDE), `--no-graph` (pure vector),
@@ -60,8 +61,10 @@ default 5). `--no-expand`/`--no-rerank` are deprecated no-ops (both stages are o
   (incremental, safe, converges even after include/exclude glob changes).
 - Changing `embeddings.model`, `chunking.*`, or `graph.edge_source`/`subchunk_size_tokens`
   invalidates the index: commands fail loud on the manifest mismatch, naming the changed
-  key and old/new value. Fix is `ragx-cli index --full` — re-embeds everything, so confirm
-  before running on a large corpus — or pin the old value back in `ragx.toml`.
+  key and old/new value. For an `edge_source`/`subchunk_size_tokens` change, `ragx-cli index
+  --edges-only` is the cheap fix — rebuilds sub-chunks/edges/communities, keeps chunk
+  embeddings. Otherwise `ragx-cli index --full` — re-embeds everything, so confirm before
+  running on a large corpus — or pin the old value back in `ragx.toml`.
 - `ragx-cli models` picks + downloads an embedding/reranker combo. All files download via
   LM Studio; serving is per engine — `--embed-engine llama-server|lm-studio` and
   `--rerank-engine llama-server|sentence-transformers`. With both on `llama-server`

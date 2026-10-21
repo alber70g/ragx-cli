@@ -24,6 +24,7 @@ ragx-cli init                  # create ragx.toml next to your corpus (interacti
 ragx-cli index                 # chunk -> embed -> HNSW + kNN similarity graph (incremental after the first run)
 ragx-cli query "why did we switch build tools?" --json --files-only
 ragx-cli index --full          # full rebuild: re-chunk + re-embed everything
+ragx-cli index --edges-only    # rebuild sub-chunks/edges/communities only; keeps chunk embeddings
 ragx-cli models                # recommend + download an embedding/reranker combo via LM Studio
 ragx-cli doctor                # check the configured providers start and answer, and the index matches
 ragx-cli --version             # version, repo, and the effective models (corpus config + ~/.ragxrc overrides)
@@ -69,8 +70,10 @@ chunk mixing several concepts gets one sharp edge per concept instead of a dilut
 between near-duplicate chunks (whole-chunk cosine ≥ `near_dup_sim`) are dropped — those are the
 measured precision-killers. Costs ~2× more embedding calls at index time than `edge_source =
 "chunk"`; retrieval units, traversal, and query flow are unchanged. Switching `edge_source` (or
-the sub-chunk size) requires `index --full`; incremental runs fail loud on the mismatch, naming
-the old/new value and the fix. Literature grounding:
+the sub-chunk size) requires either `index --edges-only` (cheap: rebuilds sub-chunks, edges and
+communities from the stored chunks — chunk embeddings and the HNSW index are kept) or
+`index --full`; incremental runs fail loud on the mismatch, naming the old/new value and both
+fixes. Literature grounding:
 `research/fine-grained-sub-chunk-edges-with-coarse-chunk-nodes-multi-granularity-graph-rag-literature-validation.md`.
 In this mode `k` counts links per *sub-chunk* with no per-chunk cap, so the graph is denser and
 shallower traversal suffices (the default `hops=2` already matches this). Quality ties
@@ -101,17 +104,24 @@ flowchart TD
 re-embeds only new/modified files, drops deleted ones, and repairs only the edge lists those
 chunks touch. Content hashes make `touch`-ed but unchanged files free, and include/exclude glob
 changes converge to the same file set a rebuild would produce. `--full` rebuilds from scratch;
-changing `embeddings.model`, `chunking.*`, or `graph.edge_source`/`subchunk_size_tokens` requires
-it — incremental runs fail loud on the manifest mismatch, naming the changed key and its old/new
-value. `ragx-cli status` reports **drift** (files new/changed/deleted since the last index) so
-you can see when a re-index is due without running one.
+changing `embeddings.model` or `chunking.*` requires it — incremental runs fail loud on the
+manifest mismatch, naming the changed key and its old/new value. Changing `graph.edge_source`/
+`subchunk_size_tokens` alone is cheaper: `--edges-only` rebuilds just the sub-chunks, edges and
+communities from the chunks already stored — it skips chunking and embedding entirely, reusing
+each chunk's stored vector (via the HNSW index) for chunks that stay whole, and only calls the
+embedder for the sub-chunk pieces a long chunk splits into. It fails loud the same way `--full`
+does if `embeddings.model`/`chunking.*` don't match the stored manifest (those invalidate the
+chunks it reuses), but `edge_source`/`subchunk_size_tokens` are exactly what it's meant to change.
+`ragx-cli status` reports **drift** (files new/changed/deleted since the last index) so you can
+see when a re-index is due without running one.
 
 Upgrading from an older `ragx-cli` after a default change (e.g. the `graph.edge_source` flip to
 `"subchunk"`): `ragx-cli init` always writes every `[graph]` key explicitly into `ragx.toml`
 (`Config.save` bakes the full default set, not just overrides), so an init-created corpus already
 pins its `edge_source`/`subchunk_size_tokens` and is unaffected by a later default change. Only a
 hand-written `ragx.toml` missing those keys picks up the new default; its next incremental
-`index` then fails loud — `index --full` rebuilds, or pin the old value back in `ragx.toml`.
+`index` then fails loud — `index --edges-only` rebuilds just the graph (cheapest), `index --full`
+rebuilds everything, or pin the old value back in `ragx.toml`.
 
 ### Querying
 
@@ -449,11 +459,11 @@ anything. If a run dies with "connection refused", `doctor` names the stage and 
 ragx-cli web [--host 127.0.0.1] [--port 8765] [--open/--no-open]
 ```
 
-Requires an index built with `graph.edge_source = "subchunk"` (the default) — the graph view
-renders stored edge weights as sub-chunk similarity, and a `"chunk"`-mode index's whole-chunk
-cosine weights would mislabel what the edges mean. Fails loud (exit 2) naming the mismatch, or
-when no index exists yet. `--open` (default) launches the browser; Ctrl-C shuts the server down
-cleanly.
+Renders whatever edges the index has: sub-chunk similarity when it was built with
+`graph.edge_source = "subchunk"` (the default), whole-chunk cosine when `"chunk"`. Fails loud
+(exit 2) only when no index exists yet. To switch an existing index to sub-chunk edges without a
+full re-embed, set the `[graph]` keys in `ragx.toml` and run `ragx-cli index --edges-only`.
+`--open` (default) launches the browser; Ctrl-C shuts the server down cleanly.
 
 Endpoints (JSON; errors are `{"error": "<message>"}`):
 

@@ -16,7 +16,7 @@ from ragx.core.config import Config, db_path, vectors_path
 from ragx.core.discovery import discover_files, hash_file
 from ragx.core.errors import ManifestMismatchError, RagxError
 from ragx.core.graph import affected_ids, knn_edges, subchunk_knn_edges
-from ragx.core.models import ChunkDraft, FileRecord
+from ragx.core.models import FileRecord
 from ragx.core.store import Store
 from ragx.core.vectors import VectorIndex
 from ragx.providers.base import Embedder
@@ -94,7 +94,7 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, full: bool = False
             vectors = embedder.embed_documents([d.text for d in drafts])
             index.add(ids, vectors)
             if edge_source == "subchunk":
-                _embed_subchunks(store, embedder, ids, drafts, vectors, sub_size)
+                _embed_subchunks(store, embedder, ids, [d.text for d in drafts], vectors, sub_size)
             new_ids.extend(ids)
             stats.files_indexed += 1
             stats.chunks_added += len(ids)
@@ -150,9 +150,15 @@ def _check_manifest(
     for key, current in checks:
         prev = store.get_meta(key)
         if prev and prev != str(current) and not allow_rewrite:
+            rebuild_hint = "run `ragx-cli index --full` to rebuild"
+            if key in ("edge_source", "subchunk_size_tokens"):
+                rebuild_hint = (
+                    "run `ragx-cli index --edges-only` to rebuild just the graph (cheaper: "
+                    "keeps chunk embeddings), or `ragx-cli index --full` to rebuild everything"
+                )
             raise ManifestMismatchError(
                 f"index was built with {key}={prev!r} but config says {current!r}; "
-                "run `ragx-cli index --full` to rebuild, or pin the old value "
+                f"{rebuild_hint}, or pin the old value "
                 f"({key} = {prev!r}) in ragx.toml to keep the existing index"
             )
 
@@ -192,18 +198,21 @@ def _embed_subchunks(
     store: Store,
     embedder: Embedder,
     ids: Sequence[int],
-    drafts: Sequence[ChunkDraft],
+    texts: Sequence[str],
     chunk_vectors: Sequence[Sequence[float]],
     sub_size: int,
-) -> None:
-    """Split each chunk into sub-chunks and persist their unit vectors.
-    A chunk that stays whole reuses its own embedding — no extra provider call."""
+) -> tuple[int, int]:
+    """Split each chunk's text into sub-chunks and persist their unit vectors.
+    A chunk that stays whole reuses its own embedding — no extra provider call.
+    Returns (sub-chunks embedded, sub-chunks reused from the chunk embedding)."""
     to_embed: list[str] = []
     spans: list[tuple[int, int, int]] = []  # (chunk_id, start, end) into to_embed
-    for cid, draft, cvec in zip(ids, drafts, chunk_vectors):
-        subs = subchunk_texts(draft.text, sub_size)
+    reused = 0
+    for cid, text, cvec in zip(ids, texts, chunk_vectors):
+        subs = subchunk_texts(text, sub_size)
         if len(subs) == 1:
             store.insert_subchunk_vectors(cid, [_unit(cvec)])
+            reused += 1
         else:
             spans.append((cid, len(to_embed), len(to_embed) + len(subs)))
             to_embed.extend(subs)
@@ -211,6 +220,7 @@ def _embed_subchunks(
         vectors = embedder.embed_documents(to_embed)
         for cid, start, end in spans:
             store.insert_subchunk_vectors(cid, [_unit(v) for v in vectors[start:end]])
+    return len(to_embed), reused
 
 
 def _subchunk_edge_fn(
