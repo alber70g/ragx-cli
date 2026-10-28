@@ -4,6 +4,37 @@ All notable changes to `ragx-cli` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] — 2026-10-28
+
+### Added
+
+- `ragx-cli init` reuses the embedding model and reranker this machine already has, instead of
+  writing defaults that trigger a new download or a second model in memory. It probes LM Studio
+  (`lms ps`/`lms ls`), llama-servers on ports 9813/9814 (`/props`), `llama-server` on PATH, and
+  the Hugging Face cache. Only catalog models are picked, because their document/query prefixes
+  are known. Embeddings, first match wins: loaded in LM Studio → served by a running
+  llama-server → downloaded in LM Studio (tier order balanced, best, fast, jina-nano).
+  Reranker: running llama-server → GGUF downloaded in LM Studio with `llama-server` on PATH →
+  `BAAI/bge-reranker-v2-m3` in the Hugging Face cache. On a TTY the detected setup is the
+  default answer, shown with its reason; `--yes` and piped stdin use it without asking.
+
+### Changed
+
+- Without `~/.ragxrc`, `init` creates it from its provider answers (embeddings, expansion, a
+  reused reranker) and leaves those keys out of `ragx.toml`. With an existing `~/.ragxrc`,
+  `init` probes nothing, does not ask for the keys the rc sets, and never modifies the rc.
+  `init --yes` with nothing detected writes the default `ragx.toml` and no rc, as before.
+- `Config.save` leaves out keys `~/.ragxrc` sets that the corpus file does not, so no override
+  warnings appear for them.
+- `ragx-cli models` writes to `~/.ragxrc` when that file exists (stderr notice), else to
+  `ragx.toml` as before.
+- A llama-server already listening on the embeddings/rerank port (for example started by
+  another corpus's ragx process) is reused only when its `/props` reports the configured GGUF.
+  Otherwise the command fails, naming the port and both GGUF paths.
+- When the embedding model comes from `~/.ragxrc`, the index/model mismatch errors of `index`,
+  `query` and `doctor` name `~/.ragxrc` and suggest `ragx-cli index --full` or
+  `ragx-cli config set --global embeddings.model <old>`, not pinning it in `ragx.toml`.
+
 ## [0.11.0] — 2026-10-28
 
 ### Changed
