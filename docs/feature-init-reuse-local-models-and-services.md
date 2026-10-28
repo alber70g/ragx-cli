@@ -14,7 +14,7 @@ on a shared port is never silently reused when it serves a different GGUF.
 
 | # | Decision | Source |
 |---|---|---|
-| D0 | **OPEN — resolve before step 4.** Albert's model: "the local ragx.toml overwrites the global one". Code today: `~/.ragxrc` overrides `ragx.toml` (`config.py` `Config.load`; CLAUDE.md "rc OVERRIDES corpus values"). See "Open: config precedence" below | 2026-10-28 |
+| D0 | Precedence stays `DEFAULTS < ragx.toml < ~/.ragxrc` (option A). Each user's machine setup wins over the committed `ragx.toml`: team members keep their own models for their own hardware and preference | 2026-10-28 |
 | D1 | Detection by live probes only: `lms ls/ps --json`, LM Studio/Ollama `/models`, llama-server `/props` on 9813/9814, Hugging Face cache, `llama-server` on PATH. No registry of corpora | discovery Q1 |
 | D2 | llama-server stays a per-process child. Before reusing a port, compare `/props.model_path` with `<section>.gguf`; on mismatch raise `RagxError` naming port and both GGUFs | Q2, Q7 |
 | D3 | A detected setup is preselected: TTY shows it as the default with its reason; `--yes`/non-TTY uses it without asking | Q3 |
@@ -24,23 +24,17 @@ on a shared port is never silently reused when it serves a different GGUF.
 | D7 | Expansion LLM is not probed; its prompt stays as today | Q9 |
 | D8 | `ragx-cli models` writes to `~/.ragxrc` when it exists (stderr notice), else `ragx.toml` as today | Q10 |
 
-## Open: config precedence (D0)
+## Config precedence (D0, resolved: option A)
 
-The two models conflict; pick one before implementing, do not blend.
+`~/.ragxrc` keeps winning over `ragx.toml`. A committed `ragx.toml` describes the corpus;
+each user's rc describes their machine. Consequence: seeding a new rc can switch the
+embedding model of a corpus that was indexed with another model; its next `index`/`query`
+fails on the manifest check. Today that error (`indexer.py:159`, `query.py:57`,
+`doctor.py:193`) advises "pin the old value in ragx.toml", which has no effect when the
+value comes from the rc. Step 4 fixes the message.
 
-- **A. Keep rc > ragx.toml (code today).** Risk: seeding a new rc changes the provider of
-  corpora initialized earlier whose `ragx.toml` names another embedding model; their next
-  `query` fails on the manifest check. Needed mitigation: the manifest-mismatch error names
-  `~/.ragxrc` as the override source and the fixes (`index --full`, or remove the key from
-  the rc).
-- **B. Flip to ragx.toml > rc (Albert's stated model).** Existing corpora keep their
-  explicit keys, so seeding an rc cannot change them. D5 becomes mandatory: any key written
-  to `ragx.toml` beats the rc, so `Config.save` must stop baking provider DEFAULTS. Breaks
-  the current use of `config set --global` to override a committed `ragx.toml`; README,
-  CLAUDE.md and `test_config_rc.py` change with it.
-
-Recommendation: B. It matches the stated intent and removes the existing-corpus risk
-without an error-message workaround. Release notes must flag the precedence change.
+Rejected: option B (ragx.toml > rc) — it would let a committed config overrule a user's
+machine setup.
 
 ## Detection rules (`core/machine_probe.py`, pure + injected probes)
 
@@ -86,9 +80,11 @@ Rerank, first match wins:
 3. `config.py`: `write_rc_values(dict)` (one write, all keys); `Config.save` omits provider
    keys the rc sets and `file_data` does not → verify: saved `ragx.toml` lacks rc keys;
    `Config.load` emits no override warning after `init`.
-4. Resolve D0; if B: flip merge order in `Config.load`, update warning text → verify:
-   `test_config_rc.py` rewritten to encode "corpus file wins"; a test that a pre-existing
-   corpus keeps its embedding model after an rc is seeded.
+4. `Config` records which effective keys came from the rc (e.g. `rc_keys`); the
+   embedding-model mismatch errors in `indexer.py`, `query.py` and `doctor.py` then name
+   `~/.ragxrc` as the source and give fixes that work: `ragx-cli index --full`, or set the
+   old model in `~/.ragxrc` → verify: a test with rc model ≠ index model asserts the message
+   names `~/.ragxrc` and does not suggest editing `ragx.toml`.
 5. `cli/app.py` + `cli/init_prompt.py`: wire the init flow above → verify: CLI tests for
    rc-exists, rc-absent+TTY (CliRunner input), rc-absent+`--yes` with and without a reuse hit.
 6. `cli/models_cmd.py`: D8 → verify: with an rc present, `models --yes` writes rc keys and
