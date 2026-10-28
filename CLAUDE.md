@@ -55,7 +55,7 @@ src/ragx/
     models.py      #   Chunk, ChunkDraft, FileRecord, Edge, ScoredChunk, QueryOutput
     store.py       #   SQLite: files/chunks/edges/meta; replace_edges normalizes src<dst
     vectors.py     #   hnswlib wrapper; soft-delete via JSON sidecar; get_vectors for graph
-    discovery.py   #   file walk, root-level .gitignore, binary/size/junk-dir filters, xxh64
+    discovery.py   #   file walk, nested .gitignore (git precedence), binary/size/junk-dir filters, xxh64
     chunking.py    #   markdown/code/recursive splitters; byte-exact slices; tiny-fragment merge;
                    #   subchunk_texts (sentence-aligned windows for subchunk edge mode)
     graph.py       #   knn_edges + subchunk_knn_edges (max over sub-chunk pairs, near-dup guard)
@@ -90,13 +90,13 @@ src/ragx/
                    # handlers.py (routing), query_runner.py (lazy providers, lock-serialized
                    # queries), static_files.py (path-traversal-safe static serving);
                    # static/ (frontend-owned: index.html, JS/CSS, vendored sigma.js)
-tests/             # 301 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
+tests/             # 305 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
 ```
 
 ## Flows
 
 **Index** (`ragx-cli index`): discover files (include/exclude globs — defaults in
-`core/corpus_globs.py`: source + text docs, minus lockfiles/requirements/build output — root .gitignore,
+`core/corpus_globs.py`: source + text docs, minus lockfiles/requirements/build output — every .gitignore in the tree (deeper overrides shallower, ignored dirs pruned),
 skip node_modules/.venv/hidden/binaries/>2MB) → xxhash diff (incremental by default since 0.8.0;
 `--full` rebuilds everything; `--changed` is a deprecated no-op alias for the default) → chunk
 (~800 tok target, chunks are exact byte slices, sub-100-char fragments
@@ -205,7 +205,7 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 
 ## Dev loop
 
-`uv sync --group dev --extra rerank` · `uv run pytest -q` (300 pass + 1 skipped, ~9 s) ·
+`uv sync --group dev --extra rerank` · `uv run pytest -q` (304 pass + 1 skipped, ~13 s) ·
 `uv run ruff check src tests` · file soft cap ~150 lines · expected failures raise `RagxError`
 (CLI maps to exit 2). Live smoke: LM Studio must be running with the configured embedding model.
 Changes that impact usage (CLI flags, config keys/precedence, output schemas, install steps)

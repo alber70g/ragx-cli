@@ -101,6 +101,58 @@ def test_discover_respects_root_gitignore(tmp_path: Path):
     assert files == [".gitignore", "kept.txt"]
 
 
+def test_discover_respects_nested_gitignore_scoped_to_its_subtree(tmp_path: Path):
+    # A subproject's .gitignore (e.g. a vendored repo's generated docs) must keep its
+    # junk out of the index, but must not leak onto same-named files elsewhere.
+    _write(tmp_path, "sub/.gitignore", "generated.md\n/anchored.md\n")
+    _write(tmp_path, "sub/generated.md")
+    _write(tmp_path, "sub/deep/generated.md")
+    _write(tmp_path, "sub/anchored.md")
+    _write(tmp_path, "sub/deep/anchored.md")
+    _write(tmp_path, "generated.md")
+    _write(tmp_path, "anchored.md")
+
+    files = discover_files(tmp_path, include=["**/*.md"], exclude=[], respect_gitignore=True)
+
+    # "/anchored.md" anchors to sub/, so only sub/anchored.md is dropped.
+    assert files == ["anchored.md", "generated.md", "sub/deep/anchored.md"]
+
+
+def test_discover_deeper_gitignore_overrides_root(tmp_path: Path):
+    # Git precedence: the deeper file wins, so a subdir can re-include what root ignores.
+    _write(tmp_path, ".gitignore", "*.log.md\n")
+    _write(tmp_path, "notes/.gitignore", "!keep.log.md\n")
+    _write(tmp_path, "notes/keep.log.md")
+    _write(tmp_path, "notes/drop.log.md")
+    _write(tmp_path, "keep.log.md")
+
+    files = discover_files(tmp_path, include=["**/*.md"], exclude=[], respect_gitignore=True)
+
+    assert files == ["notes/keep.log.md"]
+
+
+def test_discover_prunes_gitignored_directories(tmp_path: Path):
+    # Git can't re-include a file whose parent dir is ignored; ragx must not index it
+    # either, or the index would contain files git itself never tracks.
+    _write(tmp_path, ".gitignore", "out/\n")
+    _write(tmp_path, "pkg/out/.gitignore", "!kept.md\n")
+    _write(tmp_path, "pkg/out/kept.md")
+    _write(tmp_path, "pkg/src.md")
+
+    files = discover_files(tmp_path, include=["**/*.md"], exclude=[], respect_gitignore=True)
+
+    assert files == ["pkg/src.md"]
+
+
+def test_discover_ignores_nested_gitignore_when_disabled(tmp_path: Path):
+    _write(tmp_path, "sub/.gitignore", "hidden.md\n")
+    _write(tmp_path, "sub/hidden.md")
+
+    files = discover_files(tmp_path, include=["**/*.md"], exclude=[], respect_gitignore=False)
+
+    assert files == ["sub/hidden.md"]
+
+
 def test_discover_ignores_gitignore_when_disabled(tmp_path: Path):
     _write(tmp_path, ".gitignore", "notignored.txt\n")
     _write(tmp_path, "notignored.txt")

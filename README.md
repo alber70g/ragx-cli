@@ -678,7 +678,7 @@ Key defaults:
 
 | section | defaults |
 |---|---|
-| `[corpus]` | `include` = source code (`*.py`, `*.ts`, `*.go`, `*.rs`, … ~70 extensions, plus `Dockerfile`/`Makefile`) and text docs (`*.md`, `*.mdx`, `*.rst`, `*.txt`, `*.adoc`, `*.org`); `exclude` = lockfiles (`*.lock`, `package-lock.json`, `pnpm-lock.yaml`, `go.sum`, …), `requirements*.txt`/`constraints*.txt`, `LICENSE*`/`COPYING*`, `*.min.js`/`*.min.css`/`*.map`, and `dist/`, `build/`, `target/`, `coverage/`, `vendor/`; `respect_gitignore=true`. Full lists: `src/ragx/core/corpus_globs.py`. Existing `ragx.toml` files keep their own lists |
+| `[corpus]` | `include` = source code (`*.py`, `*.ts`, `*.go`, `*.rs`, … ~70 extensions, plus `Dockerfile`/`Makefile`) and text docs (`*.md`, `*.mdx`, `*.rst`, `*.txt`, `*.adoc`, `*.org`); `exclude` = lockfiles (`*.lock`, `package-lock.json`, `pnpm-lock.yaml`, `go.sum`, …), `requirements*.txt`/`constraints*.txt`, `LICENSE*`/`COPYING*`, `*.min.js`/`*.min.css`/`*.map`, and `dist/`, `build/`, `target/`, `coverage/`, `vendor/`; `respect_gitignore=true` (every `.gitignore` in the tree applies to its own subtree, with git precedence: deeper files override shallower ones, ignored directories are skipped whole). Full lists: `src/ragx/core/corpus_globs.py`. Existing `ragx.toml` files keep their own lists |
 | `[chunking]` | `size_tokens=800`, `overlap=0.15` |
 | `[graph]` | `k=8`, `min_edge_sim=0.55`, `edge_source="subchunk"`, `subchunk_size_tokens=256`, `near_dup_sim=0.9` |
 | `[traversal]` | `hops=2`, `decay=0.5`, `query_floor=0.35`, `max_frontier=150` |
