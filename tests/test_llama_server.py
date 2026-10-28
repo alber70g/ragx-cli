@@ -12,7 +12,7 @@ import respx
 from ragx.core.config import Config, write_default_config
 from ragx.core.errors import RagxError
 from ragx.providers.llama_embedder import LlamaServerEmbedder
-from ragx.providers.llama_process import MAX_BATCH_TOKENS, LlamaServerProcess
+from ragx.providers.llama_process import MAX_BATCH_TOKENS, LlamaServerProcess, serving_gguf
 from ragx.providers.llama_server import LlamaServerReranker
 from ragx.providers.registry import make_embedder, make_reranker
 
@@ -176,3 +176,50 @@ def test_spawn_passes_a_batch_large_enough_for_real_chunks(tmp_path, monkeypatch
     assert MAX_BATCH_TOKENS >= 2048  # a chunk plus its query must fit in one ubatch
     for flag, value in (("-b", batch), ("-ub", batch), ("-c", "0"), ("--parallel", "1")):
         assert cmd[cmd.index(flag) + 1] == value, f"{flag} missing or wrong: {cmd}"
+
+
+# --- GGUF identity on a reused port (another corpus's ragx process may own it) -------
+
+
+def _mock_props(model_path: str) -> respx.Route:
+    return respx.get(f"{BASE}/props").mock(
+        return_value=httpx.Response(200, json={"model_path": model_path})
+    )
+
+
+@respx.mock
+def test_reused_port_serving_another_gguf_fails_loud(tmp_path, monkeypatch):
+    ours = tmp_path / "bge-reranker-v2-m3-Q8_0.gguf"
+    ours.write_bytes(b"GGUF")
+    _mock_health()
+    _mock_props("/models/other-reranker.gguf")
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: pytest.fail("must not spawn"))
+    with pytest.raises(RagxError) as exc_info:
+        LlamaServerReranker(base_url=BASE, gguf=str(ours))
+    message = str(exc_info.value)
+    assert "port 9814" in message
+    assert "/models/other-reranker.gguf" in message and str(ours) in message
+
+
+@respx.mock
+def test_reused_port_serving_our_gguf_is_reused_without_spawn(tmp_path, monkeypatch):
+    ours = tmp_path / "bge-reranker-v2-m3-Q8_0.gguf"
+    ours.write_bytes(b"GGUF")
+    _mock_health()
+    props = _mock_props(str(ours))
+    respx.post(f"{BASE}/v1/rerank").mock(
+        return_value=httpx.Response(200, json={"results": [{"index": 0, "relevance_score": 1.0}]})
+    )
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: pytest.fail("must not spawn"))
+    rr = LlamaServerReranker(base_url=BASE, gguf=str(ours))
+    assert rr.score("q", ["a"]) == [1.0]
+    rr.score("q", ["b"])
+    assert props.call_count == 1  # verified once per process, not per request
+
+
+@respx.mock
+def test_serving_gguf_reads_props_and_tolerates_failures():
+    _mock_props("/m/bge-m3-Q8_0.gguf")
+    assert serving_gguf(f"{BASE}/v1") == "/m/bge-m3-Q8_0.gguf"
+    respx.get(f"{DEAD}/props").mock(side_effect=httpx.ConnectError("down"))
+    assert serving_gguf(DEAD) is None

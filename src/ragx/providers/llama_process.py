@@ -7,6 +7,7 @@ GGUFs typically come from LM Studio's download dir — no huggingface.co needed.
 from __future__ import annotations
 
 import atexit
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -27,12 +28,28 @@ HEALTH_TIMEOUT_S = 120
 MAX_BATCH_TOKENS = 8192
 UPGRADE_HINT = "your llama.cpp is too old for this model architecture — upgrade it (e.g. `brew upgrade llama.cpp`)"
 
+log = logging.getLogger("ragx.llama_server")
+
+
+def serving_gguf(root_url: str) -> str | None:
+    """Absolute GGUF path the llama-server at `root_url` serves (`GET /props` →
+    `model_path`); None when nothing answers or the payload has no path."""
+    try:
+        resp = httpx.get(f"{root_url.rstrip('/').removesuffix('/v1')}/props", timeout=2)
+        resp.raise_for_status()
+        path = resp.json().get("model_path")
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return None
+    return path if isinstance(path, str) and path else None
+
 
 class LlamaServerProcess:
     """Lifecycle manager: healthy() probe, ensure() lazy spawn, atexit shutdown.
 
     `section` is the config section ("rerank"/"embeddings") — used only in messages.
     `mode` is the llama-server flag: "--rerank" or "--embedding".
+    The ports are fixed, so another ragx process (another corpus) may already serve one:
+    healthy() reuses it only when it serves `gguf`, and raises otherwise.
     """
 
     def __init__(self, base_url: str, gguf: str, server_bin: str, *, mode: str, section: str) -> None:
@@ -42,12 +59,37 @@ class LlamaServerProcess:
         self._mode = mode
         self._section = section
         self._proc: subprocess.Popen | None = None
+        self._identity_checked = False
 
     def healthy(self) -> bool:
         try:
-            return httpx.get(f"{self.root_url}/health", timeout=2).status_code == 200
+            up = httpx.get(f"{self.root_url}/health", timeout=2).status_code == 200
         except httpx.TransportError:
             return False
+        if up:
+            self._check_identity()
+        return up
+
+    def _check_identity(self) -> None:
+        """Raise when the server answering at our port serves another GGUF. Checked once
+        per process; without `gguf` configured the user runs the server and nothing is
+        compared."""
+        if self.gguf is None or self._identity_checked:
+            return
+        serving = serving_gguf(self.root_url)
+        if serving is None:
+            log.warning(
+                "llama-server at %s does not report model_path in /props — cannot verify it "
+                "serves %s", self.root_url, self.gguf,
+            )
+        elif Path(serving).expanduser().resolve() != self.gguf.resolve():
+            port = urlparse(self.root_url).port
+            raise RagxError(
+                f"llama-server on port {port} serves {serving}, but {self._section}.gguf is "
+                f"{self.gguf} — stop that server (another ragx process or corpus may own it) "
+                f"or set {self._section}.base_url to another port"
+            )
+        self._identity_checked = True
 
     def check_spawnable(self) -> str:
         """Return the resolved binary; raise when auto-spawn cannot possibly work."""

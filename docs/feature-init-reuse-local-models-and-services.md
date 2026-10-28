@@ -1,6 +1,6 @@
 # Feature: `init` reuses downloaded models and running services
 
-**Status:** planned 2026-10-28, not started. Research:
+**Status:** implemented 2026-10-28. Research:
 `research/init-reuse-of-downloaded-models-and-running-services-across-corpora-*.md`.
 
 ## Goal

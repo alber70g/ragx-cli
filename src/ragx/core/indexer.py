@@ -12,7 +12,7 @@ import numpy as np
 
 from ragx.core.chunking import chunk_text, subchunk_texts
 from ragx.core.communities import leiden_communities
-from ragx.core.config import Config, db_path, vectors_path
+from ragx.core.config import Config, db_path, rc_model_mismatch, vectors_path
 from ragx.core.discovery import discover_files, hash_file
 from ragx.core.errors import ManifestMismatchError, RagxError
 from ragx.core.graph import affected_ids, knn_edges, subchunk_knn_edges
@@ -46,7 +46,7 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, full: bool = False
     db_path(root).parent.mkdir(parents=True, exist_ok=True)
     with Store(db_path(root)) as store:
         _check_manifest(
-            store, embedder, edge_source, sub_size, size_tokens, overlap, allow_rewrite=full
+            store, cfg, embedder, edge_source, sub_size, size_tokens, overlap, allow_rewrite=full
         )
         dim = embedder.dimension()
         store.set_meta("embedding_model", embedder.model)
@@ -131,6 +131,7 @@ def run_index(root: Path, cfg: Config, embedder: Embedder, *, full: bool = False
 
 def _check_manifest(
     store: Store,
+    cfg: Config,
     embedder: Embedder,
     edge_source: str,
     sub_size: int,
@@ -150,6 +151,9 @@ def _check_manifest(
     for key, current in checks:
         prev = store.get_meta(key)
         if prev and prev != str(current) and not allow_rewrite:
+            from_rc = rc_model_mismatch(cfg, prev) if key == "embedding_model" else None
+            if from_rc:
+                raise ManifestMismatchError("; ".join(from_rc))
             rebuild_hint = "run `ragx-cli index --full` to rebuild"
             if key in ("edge_source", "subchunk_size_tokens"):
                 rebuild_hint = (

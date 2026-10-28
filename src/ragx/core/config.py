@@ -186,34 +186,71 @@ def load_rc(rc: Path | None = None) -> dict[str, dict[str, Any]]:
     return data
 
 
-def write_rc_value(dotted: str, value: Any, rc: Path | None = None) -> Any:
-    """Set one provider key in ~/.ragxrc (created if missing). Returns the coerced value."""
-    section, _, key = dotted.partition(".")
-    if not key or section not in DEFAULTS or key not in DEFAULTS[section]:
-        raise RagxError(f"unknown config key: {dotted!r}")
-    if section not in PROVIDER_SECTIONS:
-        raise RagxError(
-            f"{dotted!r} is corpus-level — only {', '.join(PROVIDER_SECTIONS)} keys go in ~/.ragxrc"
-        )
+def write_rc_values(values: dict[str, Any], rc: Path | None = None) -> dict[str, Any]:
+    """Set provider keys in ~/.ragxrc (created if missing) in one write. Every key is
+    validated before anything is written. Returns the coerced values."""
+    coerced: dict[str, Any] = {}
+    for dotted, value in values.items():
+        section, _, key = dotted.partition(".")
+        if not key or section not in DEFAULTS or key not in DEFAULTS[section]:
+            raise RagxError(f"unknown config key: {dotted!r}")
+        if section not in PROVIDER_SECTIONS:
+            raise RagxError(
+                f"{dotted!r} is corpus-level — only {', '.join(PROVIDER_SECTIONS)} keys go in ~/.ragxrc"
+            )
+        coerced[dotted] = _coerce(section, key, value)
     path = rc if rc is not None else rc_path()
     data = load_rc(path)
-    coerced = _coerce(section, key, value)
-    data.setdefault(section, {})[key] = coerced
+    for dotted, value in coerced.items():
+        section, _, key = dotted.partition(".")
+        data.setdefault(section, {})[key] = value
     with path.open("wb") as f:
         tomli_w.dump(data, f)
     return coerced
+
+
+def write_rc_value(dotted: str, value: Any, rc: Path | None = None) -> Any:
+    """Set one provider key in ~/.ragxrc (created if missing). Returns the coerced value."""
+    return write_rc_values({dotted: value}, rc)[dotted]
+
+
+def rc_model_mismatch(cfg: "Config", built_with: str) -> tuple[str, str] | None:
+    """(problem, fix) for an index built with another embedding model when
+    embeddings.model comes from ~/.ragxrc — pinning the old model in ragx.toml cannot help
+    there, the rc wins. None when the model is corpus-configured."""
+    if "embeddings.model" not in cfg.rc_keys:
+        return None
+    return (
+        f"index was built with {built_with!r} but ~/.ragxrc sets embeddings.model = "
+        f"{cfg.get('embeddings.model')!r} (~/.ragxrc overrides ragx.toml)",
+        f"run `ragx-cli index --full` to rebuild with the rc model, or set the old model in "
+        f"~/.ragxrc: `ragx-cli config set --global embeddings.model {built_with}`",
+    )
 
 
 class Config:
     """Two-level (section.key) config: DEFAULTS < corpus ragx.toml < ~/.ragxrc.
 
     `data` is the effective merged view; `file_data` is the raw corpus file so that
-    `save` never bakes rc overrides into the corpus config.
+    `save` never bakes rc overrides into the corpus config. `rc_keys` are the dotted keys
+    ~/.ragxrc sets — error messages name the rc as their source.
     """
 
-    def __init__(self, data: dict[str, dict[str, Any]], file_data: dict | None = None):
+    def __init__(
+        self,
+        data: dict[str, dict[str, Any]],
+        file_data: dict | None = None,
+        rc_keys: frozenset[str] = frozenset(),
+    ):
         self.data = data
         self.file_data = file_data if file_data is not None else data
+        self.rc_keys = rc_keys
+
+    @classmethod
+    def fresh(cls, rc: Path | None = None) -> Config:
+        """DEFAULTS + ~/.ragxrc with no corpus file yet — what `init` starts from."""
+        rc_data = load_rc(rc)
+        return cls(_deep_merge(DEFAULTS, rc_data), {}, _dotted_keys(rc_data))
 
     @classmethod
     def load(
@@ -237,7 +274,9 @@ class Config:
                         "~/.ragxrc overrides %s.%s: %r (corpus) -> %r (rc)",
                         section, key, corpus_value, rc_value,
                     )
-        return cls(_deep_merge(DEFAULTS, _deep_merge(file_data, rc_data)), file_data)
+        return cls(
+            _deep_merge(DEFAULTS, _deep_merge(file_data, rc_data)), file_data, _dotted_keys(rc_data)
+        )
 
     def get(self, dotted: str) -> Any:
         section, _, key = dotted.partition(".")
@@ -258,13 +297,24 @@ class Config:
             self.file_data.setdefault(section, {})[key] = coerced
 
     def save(self, root: Path) -> None:
+        """Write DEFAULTS + the corpus values. Keys the rc sets and the corpus file does
+        not are left out — writing their defaults would only trigger override warnings."""
+        out = _deep_merge(DEFAULTS, self.file_data)
+        for dotted in self.rc_keys:
+            section, _, key = dotted.partition(".")
+            if key not in self.file_data.get(section, {}):
+                out[section].pop(key, None)
         path = config_path(root)
         with path.open("wb") as f:
-            tomli_w.dump(_deep_merge(DEFAULTS, self.file_data), f)
+            tomli_w.dump(out, f)
+
+
+def _dotted_keys(data: dict[str, dict[str, Any]]) -> frozenset[str]:
+    return frozenset(f"{section}.{key}" for section, values in data.items() for key in values)
 
 
 def write_default_config(root: Path) -> Path:
-    """Write a default ragx.toml at the corpus root. Used by `ragx-cli init`."""
-    cfg = Config({k: dict(v) for k, v in DEFAULTS.items()})
-    cfg.save(root)
+    """Write a default ragx.toml at the corpus root, minus keys ~/.ragxrc sets. Used by
+    `ragx-cli init`."""
+    Config.fresh().save(root)
     return config_path(root)

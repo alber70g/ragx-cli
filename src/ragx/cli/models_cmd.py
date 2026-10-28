@@ -14,7 +14,7 @@ from ragx.cli import models_ui as ui
 from ragx.cli.output import emit_json, fail, migrate_confirm
 from ragx.core import lmstudio
 from ragx.core.catalog import QUALITY_TIERS, detect_specs, recommend
-from ragx.core.config import Config, require_root
+from ragx.core.config import CONFIG_FILE, Config, rc_path, require_root, write_rc_values
 from ragx.core.errors import RagxError
 
 INSTALL_HINT = "LM Studio's `lms` CLI not found — install LM Studio (https://lmstudio.ai) and launch it once"
@@ -41,7 +41,8 @@ def models(
     dry_run: bool = typer.Option(False, "--dry-run", help="recommend only; no downloads, no config writes"),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Recommend + download an embedding/reranker combo and write it to ragx.toml."""
+    """Recommend + download an embedding/reranker combo and write it to ragx.toml
+    (to ~/.ragxrc instead when that exists — it would override ragx.toml anyway)."""
     try:
         root = require_root(path)
         run_flow(root, quality=quality, rerank_engine=rerank_engine,
@@ -62,6 +63,7 @@ def run_flow(
 ) -> None:
     """The actual flow, callable from `init`. Raises RagxError on failure."""
     cfg = Config.load(root, confirm=migrate_confirm())
+    target = "~/.ragxrc" if rc_path().exists() else CONFIG_FILE
     interactive = sys.stdin.isatty() and not yes
     specs = detect_specs()
     llama_found = shutil.which("llama-server") is not None
@@ -130,8 +132,8 @@ def run_flow(
             reindex_line = "REQUIRED — embedding model changes; run `ragx-cli index --full` after"
         ui.show_plan(embedding=embedding, reranker=reranker, emb_engine=emb_engine,
                      rerank_engine=engine, emb_installed=emb_pre is not None,
-                     rr_installed=rr_pre is not None, reindex_line=reindex_line)
-        if not typer.confirm("   proceed — download and update ragx.toml?", default=True, err=True):
+                     rr_installed=rr_pre is not None, reindex_line=reindex_line, target=target)
+        if not typer.confirm(f"   proceed — download and update {target}?", default=True, err=True):
             raise typer.Exit(code=0)
 
     embed_updates: list[tuple[str, str]]
@@ -171,16 +173,21 @@ def run_flow(
                           ("rerank.model", reranker.model)]
 
     reindex_required = cfg.get("embeddings.model") != installed.model_key
-    for key, value in (
+    updates = [
         ("embeddings.model", installed.model_key),
         ("embeddings.doc_prefix", embedding.doc_prefix),
         ("embeddings.query_prefix", embedding.query_prefix),
         *embed_updates,
         *rerank_updates,
-    ):
-        cfg.set(key, value)
-    cfg.save(root)
-    _echo(f"ragx.toml updated: embeddings.model={installed.model_key} (engine: {emb_engine})  "
+    ]
+    if target == CONFIG_FILE:
+        for key, value in updates:
+            cfg.set(key, value)
+        cfg.save(root)
+    else:
+        write_rc_values(dict(updates))
+        _echo(f"{rc_path()} exists — wrote the models there; applies to every ragx corpus on this machine")
+    _echo(f"{target} updated: embeddings.model={installed.model_key} (engine: {emb_engine})  "
           f"rerank.model={reranker.model} (engine: {engine})")
     if reindex_required:
         _echo("embedding model changed — the existing index is invalid; run `ragx-cli index --full`")

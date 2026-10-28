@@ -20,7 +20,7 @@ that can justify every result via the exact graph path that produced it.
 
 ```bash
 uv tool install ragx-cli --with ragx-cli[rerank]  # install and use `ragx-cli`
-ragx-cli init                  # create ragx.toml next to your corpus (interactive on a TTY; --yes for defaults)
+ragx-cli init                  # create ragx.toml next to your corpus; reuses models this machine already has (interactive on a TTY; --yes for no prompts)
 ragx-cli index                 # chunk -> embed -> HNSW + kNN similarity graph (incremental after the first run)
 ragx-cli query "why did we switch build tools?" --json --files-only
 ragx-cli index --full          # full rebuild: re-chunk + re-embed everything
@@ -117,7 +117,8 @@ see when a re-index is due without running one.
 
 Upgrading from an older `ragx-cli` after a default change (e.g. the `graph.edge_source` flip to
 `"subchunk"`): `ragx-cli init` always writes every `[graph]` key explicitly into `ragx.toml`
-(`Config.save` bakes the full default set, not just overrides), so an init-created corpus already
+(`Config.save` bakes the full default set, not just overrides — only provider keys that
+`~/.ragxrc` sets are left out), so an init-created corpus already
 pins its `edge_source`/`subchunk_size_tokens` and is unaffected by a later default change. Only a
 hand-written `ragx.toml` missing those keys picks up the new default; its next incremental
 `index` then fails loud — `index --edges-only` rebuilds just the graph (cheapest), `index --full`
@@ -347,7 +348,9 @@ Full write-ups: `research/bge-m3-dense-q8-vs-nomic-q4-benchmark-2026-07-12-workt
 
 `ragx-cli models` recommends an embedding + reranker combo, downloads the embedding model
 **through LM Studio** (`lms get` — one download path, plays well with restricted networks),
-pre-fetches the reranker from Hugging Face, and writes both to `ragx.toml`. On a TTY it walks
+pre-fetches the reranker from Hugging Face, and writes both to `ragx.toml` — or to `~/.ragxrc`
+when that file exists, since the rc would override `ragx.toml` anyway (a stderr line says so;
+`ragx.toml` is left untouched). On a TTY it walks
 three steps — context first, consequences before anything is written:
 
 1. **machine header** — detected RAM, platform, whether `llama-server` is on PATH and the
@@ -397,7 +400,14 @@ a heavier tier asks for confirmation and then **honors your choice**; non-intera
 (`--yes`/piped) auto-downgrade to `fast` with a note, since there is nobody to ask. On macOS
 `lms get --yes` picks MLX variants where LM Studio's catalog offers them. Switching the
 embedding model invalidates the index — the command tells you to run `ragx-cli index --full`.
-`init` offers this flow as its final step; rerun `ragx-cli models` anytime to switch.
+`init` offers this flow as its final step (skipped when `init` already reused a detected
+embedding model and reranker); rerun `ragx-cli models` anytime to switch.
+
+**Shared llama-server ports.** The llama-server ports are fixed (9813 embeddings, 9814 rerank),
+so a second corpus can find a server that another ragx process started. ragx reuses it only
+when its `GET /props` reports the same GGUF as `<section>.gguf`; otherwise the command fails
+loud, naming the port and both GGUF paths. The server still belongs to the process that
+started it and stops when that process exits.
 
 Why not `jina-embeddings-v5-text-nano`? Excellent model, but its EuroBERT architecture needs
 Jina's llama.cpp fork — stock LM Studio can't load it (and the license is CC-BY-NC). See
@@ -647,7 +657,16 @@ Precedence: built-in defaults < corpus `ragx.toml` < `~/.ragxrc`. The rc
 corpus config never loses silently. Set corpus-specific values without `--global`
 as usual. Other sections (chunking, graph, …) are corpus-level and rejected from
 the rc. The index-invalidation note above applies equally when the rc changes the
-effective embedding model.
+effective embedding model: the mismatch error then names `~/.ragxrc` as the source and
+offers the fixes that work — `ragx-cli index --full`, or set the old model back with
+`ragx-cli config set --global embeddings.model <old>` (pinning it in `ragx.toml` has no
+effect while the rc sets it).
+
+`ragx-cli init` creates `~/.ragxrc` only when it does not exist yet, and never modifies an
+existing one. The provider answers of a first `init` (embeddings, expansion, a reused
+reranker) seed it, so later corpora on the same machine start from the same setup; the new
+`ragx.toml` leaves out every key the rc sets, so no override warnings appear.
+`ragx-cli models` writes to the rc when it exists.
 
 ## Configuration
 
@@ -662,7 +681,22 @@ runs `ragx-cli index`. The config file itself is never indexed as corpus content
 > piped/agent runs migrate automatically with a notice on stderr. If both files exist,
 > commands fail loud — keep one and delete the other. The index itself is untouched.
 
-`ragx-cli init` is **interactive when run on a TTY**: it probes the default LM Studio
+`ragx-cli init` first looks for a setup to reuse, unless `~/.ragxrc` exists (then it prints
+the rc's provider settings, probes nothing, and does not ask for the keys the rc sets).
+Only catalog models (see `ragx-cli models`) are picked, because their document/query
+prefixes are known. Embeddings, first match wins: a catalog embedding model loaded in LM
+Studio (`lms ps`) → a llama-server on port 9813 serving a catalog GGUF → a catalog model
+downloaded in LM Studio (tier order balanced, best, fast, jina-nano; served by llama-server
+when `llama-server` is on PATH and a GGUF matches, else by LM Studio). Reranker: a
+llama-server on 9814 serving the catalog reranker GGUF → that GGUF downloaded in LM Studio
+with `llama-server` on PATH → `BAAI/bge-reranker-v2-m3` in the Hugging Face cache with
+`sentence-transformers` installed. The expansion LLM is not probed. On a TTY the detected
+setup is the default answer (`embeddings: use BGE-M3 (loaded in LM Studio)? [Y/n]`); with
+`--yes` or piped stdin it is used without asking. Either way the provider answers seed a new
+`~/.ragxrc` (stderr: `created ~/.ragxrc — applies to every ragx corpus on this machine`).
+Without an rc and with nothing detected, `--yes` writes the default `ragx.toml` and no rc.
+
+`init` is **interactive when run on a TTY**: it probes the default LM Studio
 (`localhost:1234`) and Ollama (`localhost:11434`) ports, lists the models each server
 reports, and walks through embeddings (provider/base URL/model/API-key env var), query
 expansion (enable + model — likely thinking/reasoning models are listed last, since a
@@ -670,7 +704,7 @@ non-thinking model is the better expansion choice; detection is a best-effort na
 heuristic, the APIs expose no capability flag), and corpus include/exclude
 (gitignore-style globs, comma-separated). Every prompt is pre-filled with the defaults
 below — Enter accepts them all. With piped stdin (agents), `--yes`, or
-`--no-interactive`, it writes the defaults unchanged, exactly as before. After writing the
+`--no-interactive`, it asks nothing: it uses the detected setup, or writes the defaults. After writing the
 config, `init` prints a note: an AI agent can tailor `corpus.include`/`exclude` to the
 project, and add a CLAUDE.md/AGENTS.md section on searching it with `ragx-cli query`
 (see [Using ragx-cli from a coding agent](#using-ragx-cli-from-a-coding-agent-claudemd--agentsmd)).
@@ -701,6 +735,7 @@ unchecked ones are next up. Release history: [CHANGELOG.md](CHANGELOG.md).
 - [x] **Quality & measurement**: multi-query/HyDE expansion, RRF fusion, cross-encoder rerank, `eval` harness
 - [x] **Communities**: Leiden detection over the edge list (index-time, read-only via status/inspect)
 - [x] **Interactive `init`**: LM Studio/Ollama server + model detection, guided embeddings/expansion/corpus setup (`--yes` for defaults)
+- [x] **`init` reuses this machine's models**: detects catalog models loaded/downloaded in LM Studio, running llama-servers and the HF-cached reranker; seeds `~/.ragxrc`; llama-server ports are reused only for the same GGUF
 - [x] **Committable config**: `ragx.toml` at the corpus root (0.3.0; was `.ragx/config.toml`), index data stays gitignored in `.ragx/`
 - [x] **Offline-friendly rerank**: graceful degradation + pre-seeding docs when huggingface.co is unreachable
 - [x] **Sub-chunk edges** (default since the 2026-10-21 default flip; `graph.edge_source="subchunk"`): edge weight = max cosine over sentence-aligned sub-chunk pairs, for corpora with long multi-concept chunks; set `graph.edge_source="chunk"` for the whole-chunk-cosine alternative

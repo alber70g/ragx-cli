@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from ragx.cli.app import REPO_URL, app
 from ragx.cli.output import migrate_confirm
-from ragx.core.config import CONFIG_FILE, Config
+from ragx.core.config import CONFIG_FILE, Config, load_rc
 from ragx.core.corpus_globs import DEFAULT_EXCLUDE, DEFAULT_INCLUDE
 
 runner = CliRunner()
@@ -73,12 +73,15 @@ def test_init_interactive_detects_server_and_applies_answers(tmp_path):
     assert result.exit_code == 0, result.output
     assert "detected LM Studio" in result.output
     assert "thinking/reasoning models listed last" in result.output
+    # D4: without an rc, provider answers seed ~/.ragxrc (machine setup); corpus globs stay
+    rc = load_rc()
+    assert rc["embeddings"]["provider"] == "openai"
+    assert rc["embeddings"]["base_url"] == "http://localhost:1234/v1"
+    assert rc["embeddings"]["model"] == "text-embedding-bge-m3"
+    assert rc["expansion"]["enabled"] is True
+    assert rc["expansion"]["model"] == "qwen3.5-9b"
     data = _read_config(tmp_path)
-    assert data["embeddings"]["provider"] == "openai"
-    assert data["embeddings"]["base_url"] == "http://localhost:1234/v1"
-    assert data["embeddings"]["model"] == "text-embedding-bge-m3"
-    assert data["expansion"]["enabled"] is True
-    assert data["expansion"]["model"] == "qwen3.5-9b"
+    assert "model" not in data["embeddings"] and "model" not in data["expansion"]
     assert data["corpus"]["include"] == ["**/*.md", "docs/**"]
     assert data["corpus"]["exclude"] == ["drafts/**"]
     assert data["corpus"]["respect_gitignore"] is False
@@ -93,9 +96,10 @@ def test_init_interactive_no_servers_expansion_off(tmp_path):
     answers = "\n\n\n\nn\n\n\n\n\n"
     result = runner.invoke(app, ["init", str(tmp_path), "--interactive"], input=answers)
     assert result.exit_code == 0, result.output
+    rc = load_rc()
+    assert rc["embeddings"]["model"] == "text-embedding-nomic-embed-text-v1.5@q4_k_m"
+    assert rc["expansion"] == {"enabled": False}
     data = _read_config(tmp_path)
-    assert data["embeddings"]["model"] == "text-embedding-nomic-embed-text-v1.5@q4_k_m"
-    assert data["expansion"]["enabled"] is False
     # the long default glob lists survive the comma-joined prompt round trip intact
     assert data["corpus"]["include"] == DEFAULT_INCLUDE
     assert data["corpus"]["exclude"] == DEFAULT_EXCLUDE
