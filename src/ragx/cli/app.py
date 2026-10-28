@@ -6,13 +6,15 @@ import logging
 import sys
 from importlib import metadata
 from pathlib import Path
+from typing import Any
 
 import typer
 
 from ragx.cli.init_prompt import collect_answers
 from ragx.cli.output import emit_json, fail, migrate_confirm
+from ragx.core import machine_probe
 from ragx.core.config import (
-    DEFAULTS,
+    PROVIDER_SECTIONS,
     Config,
     CONFIG_FILE,
     config_path,
@@ -21,8 +23,8 @@ from ragx.core.config import (
     load_rc,
     rc_path,
     require_root,
-    write_default_config,
     write_rc_value,
+    write_rc_values,
 )
 from ragx.core.errors import RagxError
 
@@ -115,7 +117,7 @@ def _load_config(root: Path) -> Config:
 @app.command()
 def init(
     path: Path = typer.Argument(Path(".")),
-    yes: bool = typer.Option(False, "--yes", "-y", help="skip prompts and write the default config"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="skip prompts; reuse a detected setup or write the defaults"),
     interactive: bool | None = typer.Option(
         None,
         "--interactive/--no-interactive",
@@ -124,25 +126,34 @@ def init(
 ) -> None:
     """Create a ragx.toml config at PATH (default: cwd).
 
-    On a TTY this walks through embeddings, query-expansion, and corpus include/exclude
-    settings (probing local LM Studio/Ollama for models); piped stdin or --yes writes
-    the defaults unchanged.
+    Without ~/.ragxrc, init looks for a catalog embedding model / reranker this machine
+    already has (loaded in LM Studio, served by a running llama-server, downloaded, or in
+    the Hugging Face cache) and preselects it; provider answers then seed ~/.ragxrc. With
+    an existing ~/.ragxrc nothing is probed and its keys are not asked. On a TTY this walks
+    through embeddings, query-expansion, and corpus include/exclude settings; piped stdin
+    or --yes uses the detected setup (or the defaults) unchanged.
     """
     root = path.resolve()
     if (root / CONFIG_FILE).exists():
         fail(f"{root / CONFIG_FILE} already exists")
     ask = (interactive if interactive is not None else sys.stdin.isatty()) and not yes
-    if ask:
-        cfg = Config({k: dict(v) for k, v in DEFAULTS.items()})
-        for key, value in collect_answers().items():
-            cfg.set(key, value)
+    try:
+        answers, reused = _init_answers(ask)
+        seed_rc = not rc_path().exists()
+        seed = {k: v for k, v in answers.items() if seed_rc and k.partition(".")[0] in PROVIDER_SECTIONS}
+        if seed:
+            write_rc_values(seed)
+            typer.echo(f"created {rc_path()} — applies to every ragx corpus on this machine", err=True)
+        cfg = Config.fresh()  # read after the rc is seeded, so save() leaves its keys out
+        for key, value in answers.items():
+            if key not in seed:
+                cfg.set(key, value)
         cfg.save(root)
-        cfg_path = config_path(root)
-    else:
-        cfg_path = write_default_config(root)
-    typer.echo(f"created {cfg_path}")
+    except RagxError as exc:
+        fail(str(exc))
+    typer.echo(f"created {config_path(root)}")
     typer.echo(INIT_NOTE)
-    if ask and typer.confirm(
+    if ask and reused != {"embeddings", "rerank"} and typer.confirm(
         "recommend + download models via LM Studio now? (rerun anytime: `ragx-cli models`)",
         default=False,
     ):
@@ -150,6 +161,27 @@ def init(
             models_cmd.run_flow(root)
         except RagxError as exc:
             fail(str(exc))
+
+
+def _init_answers(ask: bool) -> tuple[dict[str, Any], set[str]]:
+    """(dotted answers, sections whose detected setup was reused). An existing rc is
+    read, never probed past or modified; otherwise the machine is probed for reuse."""
+    if rc_path().exists():
+        preset = {f"{s}.{k}": v for s, values in load_rc().items() for k, v in values.items()}
+        listed = ", ".join(f"{k}={v}" for k, v in preset.items()) or "none"
+        typer.echo(f"provider settings from ~/.ragxrc: {listed}", err=True)
+        return collect_answers(preset=preset) if ask else ({}, set())
+    reuse = machine_probe.pick_reuse(machine_probe.probe_machine())
+    if ask:
+        return collect_answers(reuse=reuse)
+    answers: dict[str, Any] = {}
+    reused: set[str] = set()
+    for section, found in (("embeddings", reuse and reuse.embeddings), ("rerank", reuse and reuse.rerank)):
+        if found:
+            typer.echo(f"{section}: reusing {found.label} ({found.reason})", err=True)
+            answers.update(found.values)
+            reused.add(section)
+    return answers, reused
 
 
 def _counts(root: Path) -> tuple[int, int, int, int]:

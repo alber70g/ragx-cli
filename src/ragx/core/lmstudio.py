@@ -40,6 +40,17 @@ def models_root() -> Path:
     return Path.home() / ".lmstudio" / "models"
 
 
+def _record(entry: dict) -> InstalledModel:
+    """One `lms ls/ps --json` entry as an InstalledModel."""
+    return InstalledModel(
+        model_key=entry.get("modelKey", ""),
+        type=entry.get("type", ""),
+        format=entry.get("format", ""),
+        path=entry.get("path", ""),
+        size_bytes=int(entry.get("sizeBytes", 0)),
+    )
+
+
 def find_lms() -> str | None:
     """Locate the `lms` CLI: PATH first, then the app's default link in ~/.lmstudio/bin."""
     found = shutil.which("lms")
@@ -59,17 +70,7 @@ def list_models(lms: str) -> list[InstalledModel]:
         entries = json.loads(proc.stdout)
     except json.JSONDecodeError as exc:
         raise RagxError(f"`lms ls --json` returned invalid JSON: {exc}") from exc
-    return [
-        InstalledModel(
-            model_key=e.get("modelKey", ""),
-            type=e.get("type", ""),
-            format=e.get("format", ""),
-            path=e.get("path", ""),
-            size_bytes=int(e.get("sizeBytes", 0)),
-        )
-        for e in entries
-        if isinstance(e, dict)
-    ]
+    return [_record(e) for e in entries if isinstance(e, dict)]
 
 
 def find_installed(lms: str, repo_fragment: str) -> InstalledModel | None:
@@ -119,8 +120,8 @@ def start_server(lms: str, port: int) -> None:
         raise RagxError(f"`lms server start --port {port}` failed: {detail}")
 
 
-def loaded_identities(lms: str) -> list[str]:
-    """Identity strings (identifier / model key / path) of the models currently in memory."""
+def _ps_entries(lms: str) -> list[dict]:
+    """Parsed `lms ps --json`: one dict per model currently in memory."""
     proc = subprocess.run([lms, "ps", "--json"], capture_output=True, text=True, timeout=30)
     if proc.returncode != 0:
         detail = _ANSI.sub("", (proc.stderr or proc.stdout).strip())
@@ -129,12 +130,20 @@ def loaded_identities(lms: str) -> list[str]:
         entries = json.loads(proc.stdout or "[]")
     except json.JSONDecodeError as exc:
         raise RagxError(f"`lms ps --json` returned invalid JSON: {exc}") from exc
+    return [e for e in entries if isinstance(e, dict)]
+
+
+def loaded_identities(lms: str) -> list[str]:
+    """Identity strings (identifier / model key / path) of the models currently in memory."""
     out: list[str] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
+    for entry in _ps_entries(lms):
         out.extend(str(entry[k]) for k in ("identifier", "modelKey", "path") if entry.get(k))
     return out
+
+
+def list_loaded(lms: str) -> list[InstalledModel]:
+    """The models currently in memory (`lms ps --json`), as InstalledModel records."""
+    return [_record(e) for e in _ps_entries(lms)]
 
 
 def load_model(lms: str, model_key: str) -> None:

@@ -31,12 +31,17 @@ API contracts for every core module. Deferred feature specs live in `docs/`.
   Studio first (`providers/lmstudio_process.py`: `lms server start` + `lms load` when the
   model isn't in `lms ps`; never stops it — it's an app, not our child). Remote URLs and
   `<section>.autostart=false` skip it. Tests are disarmed by an autouse conftest fixture
-  that stubs `ensure_for_section` — never let a test reach the real `lms`.
+  that stubs `ensure_for_section` (and another that stubs `machine_probe.probe_machine`,
+  which `init` runs) — never let a test reach the real `lms`.
 - Machine-level provider settings live in `~/.ragxrc` (TOML; ONLY the embeddings/
   expansion/rerank sections, unknown keys fail loud). Precedence: DEFAULTS < corpus
   ragx.toml < ~/.ragxrc — the rc OVERRIDES corpus values and logs a stderr warning
   per overridden key. Write via `ragx-cli config set --global <key> <value>`.
-  `Config.save` never bakes rc values into the corpus file.
+  `Config.save` never bakes rc values into the corpus file, and leaves out keys the rc sets
+  that the corpus file does not (`Config.rc_keys`) — no override warnings after `init`.
+  `init` creates the rc only when absent (seeded with its provider answers, incl. a detected
+  reuse setup) and never modifies an existing one; `models` writes to the rc when it exists.
+  An index/model mismatch caused by the rc names `~/.ragxrc` (`config.rc_model_mismatch`).
 - Reranker is always local, two engines: sentence-transformers CrossEncoder (default,
   `BAAI/bge-reranker-v2-m3`, optional extra `ragx-cli[rerank]`) or `rerank.provider=
   "llama-server"` (llama.cpp `/v1/rerank` on a GGUF, auto-spawned from `rerank.gguf`;
@@ -71,7 +76,10 @@ src/ragx/
     doctor.py      #   run_doctor: config/embeddings/expansion/rerank/index health checks
                    #   (injected provider factories; backends get started here too)
     catalog.py     #   curated embedding/reranker catalog (tiers, prefixes) + spec detect
-    lmstudio.py    #   `lms` CLI wrapper: find/download (`lms get --yes`)/`lms ls --json`;
+    machine_probe.py # `init` reuse: probe_machine (injected live probes: lms ls/ps, /props on
+                   #   9813/9814, llama-server on PATH, HF cache) + pure pick_reuse ranking;
+                   #   only catalog models are auto-picked (known prefixes)
+    lmstudio.py    #   `lms` CLI wrapper: find/download (`lms get --yes`)/`lms ls|ps --json`;
                    #   LM Studio can't download plain safetensors — rerankers stay on HF
     graph_export.py #  build_graph: ragx.graph.v1 payload for `web`; renders whatever edges the
                    #   index has, subchunk or chunk-mode cosine (see Flows)
@@ -79,7 +87,8 @@ src/ragx/
                    #   communities from stored chunks, no re-chunk/re-embed (see Flows)
   providers/       # base.py protocols (Embedder/Generator/Reranker); openai_compat.py;
                    # st_reranker.py; lmstudio_process.py (LM Studio autostart);
-                   # llama_process.py (managed llama-server lifecycle) +
+                   # llama_process.py (managed llama-server lifecycle; a server already on
+                   # the port is reused only if /props.model_path == <section>.gguf) +
                    # llama_server.py (rerank) + llama_embedder.py (embeddings);
                    # registry.py factories (env-var + api_key_env resolution)
   cli/             # thin shells only: app.py (init/status/config + registration),
@@ -90,7 +99,7 @@ src/ragx/
                    # handlers.py (routing), query_runner.py (lazy providers, lock-serialized
                    # queries), static_files.py (path-traversal-safe static serving);
                    # static/ (frontend-owned: index.html, JS/CSS, vendored sigma.js)
-tests/             # 305 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
+tests/             # 336 tests; mocked HTTP (respx), FakeEmbedder integration tests, no live network
 ```
 
 ## Flows
@@ -205,7 +214,7 @@ mostly on Dutch/multilingual queries. Details: `research/bge-m3-dense-q8-vs-nomi
 
 ## Dev loop
 
-`uv sync --group dev --extra rerank` · `uv run pytest -q` (304 pass + 1 skipped, ~13 s) ·
+`uv sync --group dev --extra rerank` · `uv run pytest -q` (335 pass + 1 skipped, ~8 s) ·
 `uv run ruff check src tests` · file soft cap ~150 lines · expected failures raise `RagxError`
 (CLI maps to exit 2). Live smoke: LM Studio must be running with the configured embedding model.
 Changes that impact usage (CLI flags, config keys/precedence, output schemas, install steps)

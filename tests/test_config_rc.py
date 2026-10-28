@@ -9,8 +9,19 @@ import pytest
 from typer.testing import CliRunner
 
 from ragx.cli.app import app
-from ragx.core.config import Config, config_path, load_rc, write_default_config, write_rc_value
-from ragx.core.errors import RagxError
+from ragx.core.config import (
+    Config,
+    config_path,
+    load_rc,
+    write_default_config,
+    write_rc_value,
+    write_rc_values,
+)
+from ragx.core.doctor import FAIL, _check_index
+from ragx.core.errors import ManifestMismatchError, RagxError
+from ragx.core.indexer import run_index
+from ragx.core.query import QueryOptions, run_query
+from tests.test_integration import FakeEmbedder, make_corpus
 
 runner = CliRunner()
 
@@ -168,3 +179,77 @@ def test_cli_set_global_rejects_corpus_key(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["config", "set", "--global", "graph.k", "12"])
     assert result.exit_code == 2
+
+
+# --- rc-sourced keys: D5 (ragx.toml leaves them out) and step 4 (errors name the rc) ---
+
+
+def test_write_rc_values_validates_all_before_writing(rc):
+    with pytest.raises(RagxError, match="corpus-level"):
+        write_rc_values({"embeddings.model": "m", "graph.k": "12"})
+    assert not rc.exists()  # one bad key: nothing written, not a half-seeded rc
+    assert write_rc_values({"embeddings.model": "m", "embeddings.batch_size": "8"}) == {
+        "embeddings.model": "m", "embeddings.batch_size": 8,
+    }
+    assert load_rc(rc) == {"embeddings": {"model": "m", "batch_size": 8}}
+
+
+def test_default_config_omits_rc_keys_so_load_does_not_warn(tmp_path, rc, caplog):
+    # the rc wins anyway; writing the defaults for its keys into ragx.toml would only make
+    # every later command print an override warning per key
+    rc.write_text('[embeddings]\nmodel = "rc-model"\nprovider = "llama-server"\n')
+    write_default_config(tmp_path)
+    saved = tomllib.loads(config_path(tmp_path).read_text())
+    assert "model" not in saved["embeddings"] and "provider" not in saved["embeddings"]
+    assert saved["embeddings"]["batch_size"] == 32  # keys the rc does not set stay
+    with caplog.at_level(logging.WARNING, logger="ragx.config"):
+        cfg = Config.load(tmp_path)
+    assert not caplog.records
+    assert cfg.rc_keys == {"embeddings.model", "embeddings.provider"}
+    assert cfg.get("embeddings.model") == "rc-model"
+
+
+class RcModelEmbedder(FakeEmbedder):
+    model = "rc-model"
+
+
+def _index_then_rc_switches_model(tmp_path, rc) -> Config:
+    """Index built with fake-embedder, then the rc sets another model — the D0 consequence
+    of the rc winning over ragx.toml."""
+    make_corpus(tmp_path)
+    write_default_config(tmp_path)
+    run_index(tmp_path, Config.load(tmp_path), FakeEmbedder())
+    rc.write_text('[embeddings]\nmodel = "rc-model"\n')
+    return Config.load(tmp_path)
+
+
+def test_index_mismatch_from_rc_names_rc_not_ragx_toml(tmp_path, rc):
+    cfg = _index_then_rc_switches_model(tmp_path, rc)
+    with pytest.raises(ManifestMismatchError) as exc_info:
+        run_index(tmp_path, cfg, RcModelEmbedder())
+    message = str(exc_info.value)
+    assert "~/.ragxrc" in message
+    assert "config set --global embeddings.model fake-embedder" in message
+    assert "--full" in message
+    assert "ragx.toml to keep" not in message  # pinning in ragx.toml has no effect here
+
+
+def test_query_and_doctor_mismatch_from_rc_name_rc(tmp_path, rc):
+    cfg = _index_then_rc_switches_model(tmp_path, rc)
+    with pytest.raises(RagxError, match=r"~/\.ragxrc sets embeddings.model = 'rc-model'"):
+        run_query(tmp_path, cfg, RcModelEmbedder(), "dogs", QueryOptions())
+    status, detail, fix = _check_index(tmp_path, cfg)
+    assert status == FAIL
+    assert "~/.ragxrc" in detail
+    assert "config set --global" in fix
+
+
+def test_corpus_model_mismatch_keeps_ragx_toml_advice(tmp_path, rc):
+    make_corpus(tmp_path)
+    write_default_config(tmp_path)
+    cfg = Config.load(tmp_path)
+    run_index(tmp_path, cfg, FakeEmbedder())
+    with pytest.raises(ManifestMismatchError) as exc_info:
+        run_index(tmp_path, cfg, RcModelEmbedder())
+    assert "in ragx.toml" in str(exc_info.value)
+    assert "~/.ragxrc" not in str(exc_info.value)

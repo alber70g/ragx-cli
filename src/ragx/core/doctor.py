@@ -12,7 +12,14 @@ from typing import Callable
 
 import httpx
 
-from ragx.core.config import PROVIDER_SECTIONS, Config, config_path, db_path, rc_path
+from ragx.core.config import (
+    PROVIDER_SECTIONS,
+    Config,
+    config_path,
+    db_path,
+    rc_model_mismatch,
+    rc_path,
+)
 from ragx.core.errors import RagxError
 from ragx.core.indexer import corpus_drift
 from ragx.core.store import Store
@@ -188,6 +195,9 @@ def _check_index(root: Path, cfg: Config) -> tuple[str, str, str]:
         return WARN, "index is empty", "run `ragx-cli index`"
     configured = cfg.get("embeddings.model")
     if built_with and built_with != configured:
+        from_rc = rc_model_mismatch(cfg, built_with)
+        if from_rc:
+            return FAIL, *from_rc
         return (
             FAIL,
             f"index was built with {built_with!r} but config says {configured!r}",

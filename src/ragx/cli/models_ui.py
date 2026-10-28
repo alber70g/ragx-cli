@@ -97,6 +97,7 @@ def show_plan(
     emb_installed: bool,
     rr_installed: bool,
     reindex_line: str,
+    target: str,
 ) -> None:
     _rule("plan")
     emb_status = (
@@ -112,6 +113,6 @@ def show_plan(
         rr_status = f"downloads from Hugging Face (~{reranker.download_mb} MB)"
     echo(f"   embedding  {embedding.label:<26} via {emb_engine:<22} {emb_status}")
     echo(f"   reranker   {reranker.label:<26} via {rerank_engine:<22} {rr_status}")
-    echo("   config     ragx.toml → embeddings.*, rerank.*")
+    echo(f"   config     {target} → embeddings.*, rerank.*")
     echo(f"   re-index   {reindex_line}")
     echo()

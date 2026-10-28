@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pytest
 
+from ragx.core import machine_probe
 from ragx.providers import lmstudio_process
 
 
@@ -22,3 +23,11 @@ def _no_lmstudio_autostart(monkeypatch):
     never touch the developer's machine. Tests covering that path call
     `lmstudio_process.ensure_ready` directly with the `lms` calls stubbed out."""
     monkeypatch.setattr(lmstudio_process, "ensure_for_section", lambda cfg, section: [])
+
+
+@pytest.fixture(autouse=True)
+def _no_machine_probe(monkeypatch):
+    """`init` probes `lms`, llama-server ports and the HF cache for a setup to reuse; the
+    developer's machine must not decide what a test's init writes. Tests covering reuse
+    patch `probe_machine` with a MachineState of their own."""
+    monkeypatch.setattr(machine_probe, "probe_machine", lambda: machine_probe.MachineState())

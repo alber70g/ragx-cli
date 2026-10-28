@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from ragx.core.config import Config, db_path, vectors_path
+from ragx.core.config import Config, db_path, rc_model_mismatch, vectors_path
 from ragx.core.context import attach_context
 from ragx.core.errors import RagxError
 from ragx.core.expansion import expand_query
@@ -52,9 +52,12 @@ def _explain(trace: dict[int, dict], cid: int) -> dict | None:
     return {**entry, "seed": path[0], "path": path}
 
 
-def _check_model(store: Store, embedder: Embedder) -> None:
+def _check_model(store: Store, cfg: Config, embedder: Embedder) -> None:
     built_with = store.get_meta("embedding_model")
     if built_with != embedder.model:
+        from_rc = rc_model_mismatch(cfg, built_with or "")
+        if from_rc:
+            raise RagxError("; ".join(from_rc))
         raise RagxError(
             f"index built with {built_with!r}, config says {embedder.model!r}; "
             "run `ragx-cli index --full` to rebuild"
@@ -76,7 +79,7 @@ def run_query(
     with Store(db_path(root)) as store:
         if store.chunk_count() == 0:
             return QueryOutput(query=text)
-        _check_model(store, embedder)
+        _check_model(store, cfg, embedder)
         index = VectorIndex.load(vectors_path(root), int(store.get_meta("embedding_dim") or 0))
 
         # 1. expansion (optional, one LLM call)

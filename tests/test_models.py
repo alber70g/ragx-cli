@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 from ragx.cli.app import app
 from ragx.core import lmstudio
 from ragx.core.catalog import EMBEDDINGS, RERANKER, Specs, recommend
-from ragx.core.config import Config
+from ragx.core.config import Config, load_rc, rc_path
 from ragx.core.errors import RagxError
 
 runner = CliRunner()
@@ -192,6 +192,31 @@ def test_models_skips_download_when_installed(corpus, monkeypatch):
     cfg = Config.load(corpus)
     assert cfg.get("rerank.model") == "BAAI/bge-reranker-v2-m3"
     assert cfg.get("embeddings.query_prefix").startswith("Instruct:")
+
+
+def test_models_writes_to_existing_rc_and_leaves_ragx_toml(corpus, monkeypatch):
+    # D8: the rc overrides ragx.toml, so writing the pick to ragx.toml would have no effect
+    installed = lmstudio.InstalledModel(
+        model_key="text-embedding-bge-m3", type="embedding", format="gguf",
+        path="gpustack/bge-m3-GGUF/x.gguf", size_bytes=1,
+    )
+    monkeypatch.setattr(lmstudio, "find_lms", lambda: "/fake/lms")
+    monkeypatch.setattr(lmstudio, "find_installed", lambda lms, fragment: installed)
+    rc_path().write_text('[expansion]\nmodel = "rc-llm"\n')
+    before = (corpus / "ragx.toml").read_text()
+
+    result = runner.invoke(
+        app, ["models", "--quality", "balanced", "--rerank-engine", "sentence-transformers",
+              "--embed-engine", "lm-studio", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "~/.ragxrc updated" in result.output
+    assert (corpus / "ragx.toml").read_text() == before
+    rc = load_rc()
+    assert rc["embeddings"]["model"] == "text-embedding-bge-m3"
+    assert rc["rerank"]["provider"] == "sentence-transformers"
+    assert rc["expansion"] == {"model": "rc-llm"}  # keys models does not own stay as they were
+    assert Config.load(corpus).get("embeddings.model") == "text-embedding-bge-m3"
 
 
 def test_models_dry_run_touches_nothing(corpus, monkeypatch):
