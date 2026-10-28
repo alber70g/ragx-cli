@@ -4,6 +4,18 @@ All notable changes to `ragx-cli` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] — 2026-10-28
+
+### Changed
+
+- Discovery now honors every `.gitignore` in the corpus tree, not only the root one. Git
+  precedence applies: the deepest `.gitignore` with a matching pattern decides, so a subdirectory
+  can re-include (`!pattern`) what the root ignores; anchored patterns (`/foo.md`) resolve
+  relative to the directory holding the `.gitignore`; ignored directories are pruned, so a
+  negation can't re-include a file under them. Patterns are parsed with
+  `pathspec.GitIgnoreSpec`. An incremental `ragx-cli index` drops already-indexed files that a
+  nested `.gitignore` now excludes.
+
 ## [0.10.0] — 2026-10-21
 
 ### Added
